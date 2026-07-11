@@ -832,7 +832,7 @@ export default function App() {
               )}
               {tab === 'milk' && (
                 <MilkScreen
-                  cows={cows} milk={milk} cowById={cowById} onAdd={() => setModal({ type: 'milk' })}
+                  cows={cows} milk={milk} cowById={cowById} onAdd={() => setModal({ type: 'milkBatch' })}
                   onExport={(kind) => {
                     const rows = milkExportRows(milk, cowById);
                     if (kind === 'print') setPrintJob({ type: 'list', title: 'Milk Records', headers: MILK_HEADERS, rows });
@@ -914,6 +914,29 @@ export default function App() {
               onSave={async (data) => {
                 const { data: row, error } = await supabase.from('milk_records').insert(milkToRow(data, userId)).select().single();
                 if (!error) setMilk([...milk, mapMilkFromRow(row)]);
+                setModal(null);
+              }}
+            />
+          )}
+
+          {modal && modal.type === 'milkBatch' && (
+            <MilkBatchForm
+              cows={cows} milk={milk}
+              onClose={() => setModal(null)}
+              onSave={async ({ date, session, entries }) => {
+                const toInsert = entries.filter((e) => !e.existingId).map((e) => milkToRow({ cowId: e.cowId, date, session, liters: e.liters }, userId));
+                const toUpdate = entries.filter((e) => e.existingId);
+                const results = [];
+                if (toInsert.length) {
+                  const { data: rows, error } = await supabase.from('milk_records').insert(toInsert).select();
+                  if (!error && rows) results.push(...rows.map(mapMilkFromRow));
+                }
+                for (const e of toUpdate) {
+                  const { data: row, error } = await supabase.from('milk_records').update({ liters: e.liters }).eq('id', e.existingId).select().single();
+                  if (!error && row) results.push(mapMilkFromRow(row));
+                }
+                const updatedIds = new Set(toUpdate.map((e) => e.existingId));
+                setMilk([...milk.filter((m) => !updatedIds.has(m.id)), ...results]);
                 setModal(null);
               }}
             />
@@ -1718,6 +1741,80 @@ function MilkForm({ cows, defaultCowId, onClose, onSave }) {
       <Field label="Session"><Segmented options={['AM', 'PM']} value={session} onChange={setSession} /></Field>
       <Field label="Liters"><input type="number" min={0} step="0.1" value={liters} onChange={(e) => setLiters(e.target.value)} placeholder="e.g. 8.5" style={inputStyle} /></Field>
       <PrimaryButton disabled={!valid} onClick={() => onSave({ cowId, date, session, liters: Number(liters) })}>Save entry</PrimaryButton>
+    </Modal>
+  );
+}
+
+function MilkBatchForm({ cows, milk, onClose, onSave }) {
+  const [date, setDate] = useState(todayStr());
+  const [session, setSession] = useState('AM');
+  const [values, setValues] = useState({}); // cowId -> string liters
+
+  // Whenever date/session changes, prefill from any existing entries for that date+session
+  useEffect(() => {
+    const prefill = {};
+    cows.forEach((c) => {
+      const existing = milk.find((m) => m.cowId === c.id && m.date === date && m.session === session);
+      if (existing) prefill[c.id] = String(existing.liters);
+    });
+    setValues(prefill);
+  }, [date, session]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const setVal = (cowId, v) => setValues((prev) => ({ ...prev, [cowId]: v }));
+
+  const filledCount = Object.values(values).filter((v) => v !== '' && v !== undefined).length;
+  const total = Object.values(values).reduce((s, v) => s + (v ? Number(v) : 0), 0);
+
+  const handleSave = () => {
+    const entries = cows
+      .filter((c) => values[c.id] !== '' && values[c.id] !== undefined && !isNaN(Number(values[c.id])))
+      .map((c) => {
+        const existing = milk.find((m) => m.cowId === c.id && m.date === date && m.session === session);
+        return { cowId: c.id, liters: Number(values[c.id]), existingId: existing ? existing.id : null };
+      });
+    if (entries.length === 0) return;
+    onSave({ date, session, entries });
+  };
+
+  return (
+    <Modal title="Log Milk" onClose={onClose}>
+      <Field label="Date"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} max={todayStr()} /></Field>
+      <Field label="Session"><Segmented options={['AM', 'PM']} value={session} onChange={setSession} /></Field>
+
+      {cows.length === 0 ? (
+        <MutedNote text="Add a cow first before logging milk." />
+      ) : (
+        <>
+          <div className="ff-body" style={{ fontSize: 11, fontWeight: 600, color: C.sub, marginBottom: 6 }}>
+            Enter liters for each cow — leave blank to skip a cow for this session.
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+            {cows.map((c) => (
+              <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: `1px solid ${C.line}`, borderRadius: 10, padding: '8px 10px' }}>
+                <EarTag number={c.tagNumber} size="sm" />
+                <div style={{ flex: 1 }}>
+                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{c.name}</div>
+                  <div style={{ fontSize: 10.5, color: C.sub }}>{c.status !== 'active' ? c.status : '\u00A0'}</div>
+                </div>
+                <input
+                  type="number" min={0} step="0.1" placeholder="—" value={values[c.id] ?? ''}
+                  onChange={(e) => setVal(c.id, e.target.value)}
+                  style={{ ...inputStyle, width: 76, textAlign: 'right', padding: '8px 10px' }}
+                />
+                <span className="ff-body" style={{ fontSize: 12, color: C.sub }}>L</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ background: C.milkSoft, borderRadius: 10, padding: '8px 12px', marginBottom: 14, display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+            <span style={{ color: C.milk, fontWeight: 600 }}>{filledCount} of {cows.length} cows entered</span>
+            <span style={{ color: C.milk, fontWeight: 700 }}>{total.toFixed(1)} L total</span>
+          </div>
+        </>
+      )}
+
+      <PrimaryButton disabled={filledCount === 0} onClick={handleSave}>
+        Save {filledCount > 0 ? `${filledCount} ${filledCount === 1 ? 'entry' : 'entries'}` : 'entries'}
+      </PrimaryButton>
     </Modal>
   );
 }
