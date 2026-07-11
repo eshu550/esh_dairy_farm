@@ -52,6 +52,11 @@ const addDays = (dateStr, n) => {
   d.setDate(d.getDate() + n);
   return d.toISOString().slice(0, 10);
 };
+const addMonths = (dateStr, n) => {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setMonth(d.getMonth() + n);
+  return d.toISOString().slice(0, 10);
+};
 const diffDays = (dateStr) => {
   const d = new Date(dateStr + 'T00:00:00');
   const t = new Date(todayStr() + 'T00:00:00');
@@ -238,6 +243,7 @@ function CowPrintBody({ job }) {
           {cow.firstHeatDate && <>First heat: {fmtDate(cow.firstHeatDate)} &nbsp;·&nbsp; </>}
           {cow.inseminatedOn && <>Inseminated on: {fmtDate(cow.inseminatedOn)}</>}
           {cow.mastitisAntibiotic && <><br />Mastitis antibiotic: {cow.mastitisAntibiotic}</>}
+          {cow.pregnancyConfirmed && cow.inseminatedOn && <><br />Pregnant — expected calving {fmtDate(addMonths(cow.inseminatedOn, 9))}</>}
         </div>
       </div>
       {milkRows.length > 0 && (
@@ -321,12 +327,12 @@ const MED_HEADERS = ['Date', 'Tag #', 'Cow', 'Type', 'Details', 'Vet', 'Next Fol
 const mapCowFromRow = (r) => ({
   id: r.id, name: r.name, tagNumber: r.tag_number, breed: r.breed, dob: r.dob, status: r.status,
   cycleLength: r.cycle_length, calvingDate: r.calving_date || '', firstHeatDate: r.first_heat_date || '',
-  inseminatedOn: r.inseminated_on || '', mastitisAntibiotic: r.mastitis_antibiotic || '',
+  inseminatedOn: r.inseminated_on || '', pregnancyConfirmed: !!r.pregnancy_confirmed, mastitisAntibiotic: r.mastitis_antibiotic || '',
 });
 const cowToRow = (c, userId) => ({
   user_id: userId, name: c.name, tag_number: c.tagNumber, breed: c.breed, dob: c.dob || null, status: c.status,
   cycle_length: c.cycleLength, calving_date: c.calvingDate || null, first_heat_date: c.firstHeatDate || null,
-  inseminated_on: c.inseminatedOn || null, mastitis_antibiotic: c.mastitisAntibiotic || null,
+  inseminated_on: c.inseminatedOn || null, pregnancy_confirmed: !!c.pregnancyConfirmed, mastitis_antibiotic: c.mastitisAntibiotic || null,
 });
 const mapMilkFromRow = (r) => ({ id: r.id, cowId: r.cow_id, date: r.date, session: r.session, liters: r.liters });
 const milkToRow = (m, userId) => ({ user_id: userId, cow_id: m.cowId, date: m.date, session: m.session, liters: m.liters });
@@ -795,6 +801,7 @@ export default function App() {
                   const sections = [];
                   sections.push(`${cow.name} — Tag #${cow.tagNumber}`);
                   sections.push(`Breed: ${cow.breed}, DOB: ${fmtDate(cow.dob)}, Status: ${cow.status}`);
+                  if (cow.pregnancyConfirmed && cow.inseminatedOn) sections.push(`Pregnant - expected calving ${fmtDate(addMonths(cow.inseminatedOn, 9))}`);
                   if (milkRows.length) sections.push('', 'MILK RECORDS', toCSV(['Date', 'Session', 'Liters'], milkRows));
                   if (heatRows.length) sections.push('', 'HEAT RECORDS', toCSV(['Date', 'Bred', 'Notes'], heatRows));
                   if (medRows.length) sections.push('', 'HEALTH RECORDS', toCSV(['Date', 'Type', 'Details', 'Vet', 'Next Due'], medRows));
@@ -1228,6 +1235,11 @@ function CowDetail({ cow, milk, heat, medical, calves, heatStatus, insemStatus, 
             {cow.calvingDate && <div style={{ fontSize: 11.5, color: C.sub }}>Last calving: {fmtDate(cow.calvingDate)}</div>}
             {cow.firstHeatDate && <div style={{ fontSize: 11.5, color: C.sub }}>First heat after calving: {fmtDate(cow.firstHeatDate)}</div>}
             {cow.inseminatedOn && <div style={{ fontSize: 11.5, color: C.sub }}>Inseminated on: {fmtDate(cow.inseminatedOn)}</div>}
+            {cow.pregnancyConfirmed && cow.inseminatedOn && (
+              <div style={{ marginTop: 6 }}>
+                <Chip bg={C.greenSoft} fg={C.green}>Pregnant · Expected calving {fmtDate(addMonths(cow.inseminatedOn, 9))}</Chip>
+              </div>
+            )}
             {cow.mastitisAntibiotic && <div style={{ marginTop: 6 }}><Chip bg={C.amberSoft} fg={C.amber}>Mastitis: {cow.mastitisAntibiotic}</Chip></div>}
             {cowCalves.length > 0 && <div style={{ fontSize: 11.5, color: C.sub, marginTop: 4 }}>Calvings on record: {cowCalves.length}</div>}
           </div>
@@ -1382,7 +1394,9 @@ function ListBlock({ items, empty, addLabel, onAdd, render }) {
 // ---------- Milk screen ----------
 function MilkScreen({ cows, milk, cowById, onAdd, onExport }) {
   const [date, setDate] = useState(todayStr());
-  const entries = milk.filter((m) => m.date === date).sort((a, b) => (a.session > b.session ? 1 : -1));
+  const [sessionFilter, setSessionFilter] = useState('Both');
+  const dayEntries = milk.filter((m) => m.date === date).sort((a, b) => (a.session > b.session ? 1 : -1));
+  const entries = sessionFilter === 'Both' ? dayEntries : dayEntries.filter((m) => m.session === sessionFilter);
   const total = entries.reduce((s, m) => s + Number(m.liters || 0), 0);
 
   return (
@@ -1400,9 +1414,14 @@ function MilkScreen({ cows, milk, cowById, onAdd, onExport }) {
         <Field label="Date">
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} max={todayStr()} />
         </Field>
+        <Field label="Session">
+          <Segmented options={['Both', 'AM', 'PM']} value={sessionFilter} onChange={setSessionFilter} />
+        </Field>
         <div style={{ background: C.milkSoft, borderRadius: 14, padding: 14, marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
-            <div className="ff-body" style={{ fontSize: 11.5, color: C.milk, fontWeight: 600 }}>Total for {fmtDate(date)}</div>
+            <div className="ff-body" style={{ fontSize: 11.5, color: C.milk, fontWeight: 600 }}>
+              Total for {fmtDate(date)}{sessionFilter !== 'Both' ? ` · ${sessionFilter}` : ''}
+            </div>
             <div className="ff-display" style={{ fontSize: 24, fontWeight: 700, color: C.milk }}>{total.toFixed(1)} L</div>
           </div>
           <Droplet size={26} color={C.milk} />
@@ -1412,7 +1431,7 @@ function MilkScreen({ cows, milk, cowById, onAdd, onExport }) {
         {cows.length === 0 ? (
           <EmptyState icon={<Milk size={30} />} title="Add a cow first" subtitle="You'll need at least one cow profile before logging milk." />
         ) : entries.length === 0 ? (
-          <MutedNote text="No milk logged for this date yet." />
+          <MutedNote text={sessionFilter === 'Both' ? 'No milk logged for this date yet.' : `No ${sessionFilter} milk logged for this date yet.`} />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {entries.map((m) => {
@@ -1551,6 +1570,24 @@ function HealthScreen({ medical, cowById, onAdd, onExport }) {
 }
 
 // ================= FORMS =================
+function ClearableDate({ value, onChange, max }) {
+  return (
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+      <input type="date" value={value} onChange={(e) => onChange(e.target.value)} style={{ ...inputStyle, flex: 1 }} max={max} />
+      {value && (
+        <button
+          type="button"
+          onClick={() => onChange('')}
+          className="ff-body"
+          style={{ background: C.greySoft, border: 'none', borderRadius: 9, padding: '10px 12px', fontSize: 12, fontWeight: 700, color: C.ink, flexShrink: 0 }}
+        >
+          Clear
+        </button>
+      )}
+    </div>
+  );
+}
+
 function CowForm({ initial, onClose, onSave }) {
   const [name, setName] = useState(initial?.name || '');
   const [tagNumber, setTagNumber] = useState(initial?.tagNumber || '');
@@ -1561,33 +1598,55 @@ function CowForm({ initial, onClose, onSave }) {
   const [calvingDate, setCalvingDate] = useState(initial?.calvingDate || '');
   const [firstHeatDate, setFirstHeatDate] = useState(initial?.firstHeatDate || '');
   const [inseminatedOn, setInseminatedOn] = useState(initial?.inseminatedOn || '');
+  const [pregnancyConfirmed, setPregnancyConfirmed] = useState(initial?.pregnancyConfirmed || false);
   const [mastitisAntibiotic, setMastitisAntibiotic] = useState(initial?.mastitisAntibiotic || '');
   const valid = name.trim() && tagNumber.trim();
+  const expectedCalving = pregnancyConfirmed && inseminatedOn ? addMonths(inseminatedOn, 9) : '';
 
   return (
     <Modal title={initial ? 'Edit Cow' : 'Add Cow'} onClose={onClose}>
       <Field label="Name"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Ganga" style={inputStyle} /></Field>
       <Field label="Ear tag number"><input value={tagNumber} onChange={(e) => setTagNumber(e.target.value)} placeholder="e.g. 014" style={inputStyle} /></Field>
       <Field label="Breed"><Segmented options={BREEDS} value={breed} onChange={setBreed} /></Field>
-      <Field label="Date of birth"><input type="date" value={dob} onChange={(e) => setDob(e.target.value)} style={inputStyle} max={todayStr()} /></Field>
+      <Field label="Date of birth"><ClearableDate value={dob} onChange={setDob} max={todayStr()} /></Field>
       <Field label="Status"><Segmented options={['active', 'dry', 'sold']} value={status} onChange={setStatus} /></Field>
       <Field label="Average heat cycle length (days)">
         <input type="number" min={15} max={30} value={cycleLength} onChange={(e) => setCycleLength(Number(e.target.value))} style={inputStyle} />
       </Field>
       <Field label="Date of last calving (optional)">
-        <input type="date" value={calvingDate} onChange={(e) => setCalvingDate(e.target.value)} style={inputStyle} max={todayStr()} />
+        <ClearableDate value={calvingDate} onChange={setCalvingDate} max={todayStr()} />
       </Field>
       <Field label="Date of first heat after calving (optional)">
-        <input type="date" value={firstHeatDate} onChange={(e) => setFirstHeatDate(e.target.value)} style={inputStyle} max={todayStr()} />
+        <ClearableDate value={firstHeatDate} onChange={setFirstHeatDate} max={todayStr()} />
       </Field>
       <Field label="Inseminated on (optional)">
-        <input type="date" value={inseminatedOn} onChange={(e) => setInseminatedOn(e.target.value)} style={inputStyle} max={todayStr()} />
+        <ClearableDate value={inseminatedOn} onChange={setInseminatedOn} max={todayStr()} />
         <div className="ff-body" style={{ fontSize: 11, color: C.sub, marginTop: 5 }}>You'll get a reminder 20 days after this date to check for repeat heat / pregnancy.</div>
+      </Field>
+      <Field label="Pregnancy confirmed?">
+        <button
+          type="button"
+          onClick={() => setPregnancyConfirmed(!pregnancyConfirmed)}
+          disabled={!inseminatedOn}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, border: `1.5px solid ${pregnancyConfirmed ? C.green : C.line}`, background: pregnancyConfirmed ? C.greenSoft : '#fff', borderRadius: 10, padding: '9px 12px', opacity: inseminatedOn ? 1 : 0.5, width: '100%' }}
+        >
+          <div style={{ width: 18, height: 18, borderRadius: 5, border: `1.5px solid ${pregnancyConfirmed ? C.green : C.grey}`, background: pregnancyConfirmed ? C.green : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            {pregnancyConfirmed && <Check size={12} color="#fff" />}
+          </div>
+          <span className="ff-body" style={{ fontSize: 13, color: C.ink, fontWeight: 600 }}>
+            {inseminatedOn ? 'Yes, pregnancy confirmed' : 'Add an insemination date first'}
+          </span>
+        </button>
+        {expectedCalving && (
+          <div className="ff-body" style={{ fontSize: 12, color: C.green, marginTop: 8, background: C.greenSoft, borderRadius: 9, padding: '8px 10px' }}>
+            Expected calving: <strong>{fmtDate(expectedCalving)}</strong> (9 months from insemination)
+          </div>
+        )}
       </Field>
       <Field label="Antibiotic used for mastitis (optional)">
         <input value={mastitisAntibiotic} onChange={(e) => setMastitisAntibiotic(e.target.value)} placeholder="e.g. Amoxicillin" style={inputStyle} />
       </Field>
-      <PrimaryButton disabled={!valid} onClick={() => onSave({ name: name.trim(), tagNumber: tagNumber.trim(), breed, dob, status, cycleLength, calvingDate, firstHeatDate, inseminatedOn, mastitisAntibiotic: mastitisAntibiotic.trim() })}>
+      <PrimaryButton disabled={!valid} onClick={() => onSave({ name: name.trim(), tagNumber: tagNumber.trim(), breed, dob, status, cycleLength, calvingDate, firstHeatDate, inseminatedOn, pregnancyConfirmed: !!(pregnancyConfirmed && inseminatedOn), mastitisAntibiotic: mastitisAntibiotic.trim() })}>
         {initial ? 'Save changes' : 'Add cow'}
       </PrimaryButton>
     </Modal>
