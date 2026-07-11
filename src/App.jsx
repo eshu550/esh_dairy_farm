@@ -261,7 +261,7 @@ function CowPrintBody({ job }) {
       {medRows.length > 0 && (
         <>
           <div style={{ fontWeight: 700, fontSize: 13, margin: '14px 0 6px' }}>Health Records</div>
-          <PrintTable headers={['Date', 'Type', 'Details', 'Vet', 'Next Due']} rows={medRows} />
+          <PrintTable headers={['Date', 'Type', 'Medicine', 'Details', 'Vet', 'Next Due']} rows={medRows} />
         </>
       )}
       {calfRows && calfRows.length > 0 && (
@@ -318,10 +318,10 @@ const MILK_HEADERS = ['Date', 'Tag #', 'Cow', 'Session', 'Liters'];
 function medExportRows(medical, cowById) {
   return medical.slice().sort((a, b) => a.date.localeCompare(b.date)).map((m) => {
     const cow = cowById(m.cowId);
-    return [fmtDate(m.date), cow ? cow.tagNumber : '', cow ? cow.name : 'Unknown', m.type, m.description || '', m.vet || '', m.nextDueDate ? fmtDate(m.nextDueDate) : ''];
+    return [fmtDate(m.date), cow ? cow.tagNumber : '', cow ? cow.name : 'Unknown', m.type, m.medicine || '', m.description || '', m.vet || '', m.nextDueDate ? fmtDate(m.nextDueDate) : ''];
   });
 }
-const MED_HEADERS = ['Date', 'Tag #', 'Cow', 'Type', 'Details', 'Vet', 'Next Follow-up'];
+const MED_HEADERS = ['Date', 'Tag #', 'Cow', 'Type', 'Medicine', 'Details', 'Vet', 'Next Follow-up'];
 
 // ---------- Supabase row <-> app object mapping ----------
 const mapCowFromRow = (r) => ({
@@ -338,8 +338,8 @@ const mapMilkFromRow = (r) => ({ id: r.id, cowId: r.cow_id, date: r.date, sessio
 const milkToRow = (m, userId) => ({ user_id: userId, cow_id: m.cowId, date: m.date, session: m.session, liters: m.liters });
 const mapHeatFromRow = (r) => ({ id: r.id, cowId: r.cow_id, date: r.date, bred: r.bred, notes: r.notes || '' });
 const heatToRow = (h, userId) => ({ user_id: userId, cow_id: h.cowId, date: h.date, bred: !!h.bred, notes: h.notes || null });
-const mapMedFromRow = (r) => ({ id: r.id, cowId: r.cow_id, date: r.date, type: r.type, description: r.description || '', vet: r.vet || '', nextDueDate: r.next_due_date || '' });
-const medToRow = (m, userId) => ({ user_id: userId, cow_id: m.cowId, date: m.date, type: m.type, description: m.description || null, vet: m.vet || null, next_due_date: m.nextDueDate || null });
+const mapMedFromRow = (r) => ({ id: r.id, cowId: r.cow_id, date: r.date, type: r.type, medicine: r.medicine || '', description: r.description || '', vet: r.vet || '', nextDueDate: r.next_due_date || '' });
+const medToRow = (m, userId) => ({ user_id: userId, cow_id: m.cowId, date: m.date, type: m.type, medicine: m.medicine || null, description: m.description || null, vet: m.vet || null, next_due_date: m.nextDueDate || null });
 const mapCalfFromRow = (r) => ({ id: r.id, cowId: r.cow_id, date: r.date, calfName: r.calf_name || '', calfTagNumber: r.calf_tag_number || '', gender: r.gender || '', birthWeight: r.birth_weight ?? '', notes: r.notes || '' });
 const calfToRow = (c, userId) => ({ user_id: userId, cow_id: c.cowId, date: c.date, calf_name: c.calfName || null, calf_tag_number: c.calfTagNumber || null, gender: c.gender || null, birth_weight: c.birthWeight === '' ? null : c.birthWeight, notes: c.notes || null });
 const mapFeedTypeFromRow = (r) => ({ id: r.id, name: r.name, costPerBag: r.cost_per_bag });
@@ -793,7 +793,7 @@ export default function App() {
                 if (!cow) return;
                 const milkRows = milk.filter((m) => m.cowId === cow.id).sort((a, b) => a.date.localeCompare(b.date)).map((m) => [fmtDate(m.date), m.session, m.liters]);
                 const heatRows = heat.filter((h) => h.cowId === cow.id).sort((a, b) => a.date.localeCompare(b.date)).map((h) => [fmtDate(h.date), h.bred ? 'Yes' : 'No', h.notes || '']);
-                const medRows = medical.filter((m) => m.cowId === cow.id).sort((a, b) => a.date.localeCompare(b.date)).map((m) => [fmtDate(m.date), m.type, m.description || '', m.vet || '', m.nextDueDate ? fmtDate(m.nextDueDate) : '']);
+                const medRows = medical.filter((m) => m.cowId === cow.id).sort((a, b) => a.date.localeCompare(b.date)).map((m) => [fmtDate(m.date), m.type, m.medicine || '', m.description || '', m.vet || '', m.nextDueDate ? fmtDate(m.nextDueDate) : '']);
                 const calfRows = calves.filter((c) => c.cowId === cow.id).sort((a, b) => a.date.localeCompare(b.date)).map((c) => [fmtDate(c.date), c.calfName || '', c.calfTagNumber || '', c.gender || '', c.birthWeight || '', c.notes || '']);
                 if (kind === 'print') {
                   setPrintJob({ type: 'cow', title: `${cow.name} — Full Record`, cow, milkRows, heatRows, medRows, calfRows });
@@ -804,7 +804,7 @@ export default function App() {
                   if (cow.pregnancyConfirmed && cow.inseminatedOn) sections.push(`Pregnant - expected calving ${fmtDate(addMonths(cow.inseminatedOn, 9))}`);
                   if (milkRows.length) sections.push('', 'MILK RECORDS', toCSV(['Date', 'Session', 'Liters'], milkRows));
                   if (heatRows.length) sections.push('', 'HEAT RECORDS', toCSV(['Date', 'Bred', 'Notes'], heatRows));
-                  if (medRows.length) sections.push('', 'HEALTH RECORDS', toCSV(['Date', 'Type', 'Details', 'Vet', 'Next Due'], medRows));
+                  if (medRows.length) sections.push('', 'HEALTH RECORDS', toCSV(['Date', 'Type', 'Medicine', 'Details', 'Vet', 'Next Due'], medRows));
                   if (calfRows.length) sections.push('', 'CALF RECORDS', toCSV(['Date', 'Calf Name', 'Tag #', 'Gender', 'Birth Weight (kg)', 'Notes'], calfRows));
                   downloadFile(`${cow.name.replace(/\s+/g, '_')}_record.csv`, sections.join('\n'));
                 }
@@ -935,9 +935,10 @@ export default function App() {
             <MedicalForm
               cows={cows} defaultCowId={modal.cowId}
               onClose={() => setModal(null)}
-              onSave={async (data) => {
-                const { data: row, error } = await supabase.from('medical_records').insert(medToRow(data, userId)).select().single();
-                if (!error) setMedical([...medical, mapMedFromRow(row)]);
+              onSave={async ({ cowIds, ...rest }) => {
+                const rowsToInsert = cowIds.map((cid) => medToRow({ ...rest, cowId: cid }, userId));
+                const { data: rows, error } = await supabase.from('medical_records').insert(rowsToInsert).select();
+                if (!error && rows) setMedical([...medical, ...rows.map(mapMedFromRow)]);
                 setModal(null);
               }}
             />
@@ -1206,6 +1207,7 @@ function CowsScreen({ cows, heatStatusFor, onOpenCow, onAdd, onExport }) {
 function CowDetail({ cow, milk, heat, medical, calves, heatStatus, insemStatus, onBack, onEdit, onDelete, onAddMilk, onAddHeat, onAddMedical, onAddCalf, onExport }) {
   const [sub, setSub] = useState('milk');
   const [confirmDel, setConfirmDel] = useState(false);
+  const [viewingMed, setViewingMed] = useState(null);
   if (!cow) return null;
   const cowMilk = milk.filter((m) => m.cowId === cow.id).sort((a, b) => b.date.localeCompare(a.date));
   const cowHeat = heat.filter((h) => h.cowId === cow.id).sort((a, b) => b.date.localeCompare(a.date));
@@ -1330,14 +1332,15 @@ function CowDetail({ cow, milk, heat, medical, calves, heatStatus, insemStatus, 
             addLabel="Add health record"
             onAdd={onAddMedical}
             render={(m) => (
-              <div key={m.id} style={{ ...rowCardStyle, alignItems: 'flex-start' }}>
+              <div key={m.id} onClick={() => setViewingMed(m)} style={{ ...rowCardStyle, alignItems: 'flex-start' }}>
                 <div style={{ color: C.amber, marginTop: 2 }}><Syringe size={16} /></div>
                 <div style={{ flex: 1, marginLeft: 10 }}>
                   <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{m.type}</div>
                   <div style={{ fontSize: 11.5, color: C.sub, marginTop: 1 }}>{fmtDate(m.date)}{m.vet ? ` · ${m.vet}` : ''}</div>
-                  {m.description && <div style={{ fontSize: 12, color: C.ink, marginTop: 4 }}>{m.description}</div>}
+                  {m.medicine && <div style={{ fontSize: 12, color: C.ink, marginTop: 4 }}>Medicine: {m.medicine}</div>}
                   {m.nextDueDate && <div style={{ fontSize: 11, color: C.amber, marginTop: 4, fontWeight: 600 }}>Next due {fmtDateShort(m.nextDueDate)}</div>}
                 </div>
+                <ChevronRight size={16} color={C.grey} />
               </div>
             )}
           />
@@ -1372,6 +1375,7 @@ function CowDetail({ cow, milk, heat, medical, calves, heatStatus, insemStatus, 
           <PrimaryButton danger onClick={onDelete}>Delete permanently</PrimaryButton>
         </Modal>
       )}
+      {viewingMed && <HealthDetailModal record={viewingMed} cow={cow} onClose={() => setViewingMed(null)} />}
     </div>
   );
 }
@@ -1521,8 +1525,43 @@ function HeatScreen({ cows, heat, heatStatusFor, cowById, onAdd, onOpenCow }) {
 }
 
 // ---------- Health screen ----------
+function HealthDetailModal({ record, cow, onClose }) {
+  if (!record) return null;
+  return (
+    <Modal title="Health Record" onClose={onClose}>
+      {cow && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <EarTag number={cow.tagNumber} size="sm" />
+          <div>
+            <div className="ff-display" style={{ fontWeight: 700, fontSize: 14, color: C.ink }}>{cow.name}</div>
+            <div style={{ fontSize: 11.5, color: C.sub }}>{cow.breed}</div>
+          </div>
+        </div>
+      )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <DetailRow label="Date" value={fmtDate(record.date)} />
+        <DetailRow label="Type" value={record.type} />
+        {record.medicine && <DetailRow label="Medicine used" value={record.medicine} />}
+        {record.description && <DetailRow label="Details" value={record.description} />}
+        {record.vet && <DetailRow label="Vet / attended by" value={record.vet} />}
+        {record.nextDueDate && <DetailRow label="Next follow-up" value={fmtDate(record.nextDueDate)} />}
+      </div>
+    </Modal>
+  );
+}
+
+function DetailRow({ label, value }) {
+  return (
+    <div>
+      <div className="ff-body" style={{ fontSize: 11, fontWeight: 600, color: C.sub, marginBottom: 2 }}>{label}</div>
+      <div className="ff-body" style={{ fontSize: 13.5, color: C.ink, lineHeight: 1.5 }}>{value}</div>
+    </div>
+  );
+}
+
 function HealthScreen({ medical, cowById, onAdd, onExport }) {
   const rows = medical.slice().sort((a, b) => b.date.localeCompare(a.date));
+  const [viewing, setViewing] = useState(null);
   return (
     <div>
       <ScreenHeader
@@ -1544,12 +1583,12 @@ function HealthScreen({ medical, cowById, onAdd, onExport }) {
               const overdue = m.nextDueDate && diffDays(m.nextDueDate) < 0;
               const soon = m.nextDueDate && diffDays(m.nextDueDate) >= 0 && diffDays(m.nextDueDate) <= 7;
               return (
-                <div key={m.id} style={{ ...rowCardStyle, alignItems: 'flex-start' }}>
+                <div key={m.id} onClick={() => setViewing(m)} style={{ ...rowCardStyle, alignItems: 'flex-start' }}>
                   {cow && <EarTag number={cow.tagNumber} size="sm" />}
                   <div style={{ flex: 1, marginLeft: 10 }}>
                     <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{cow ? cow.name : 'Unknown'} · {m.type}</div>
                     <div style={{ fontSize: 11.5, color: C.sub, marginTop: 1 }}>{fmtDate(m.date)}{m.vet ? ` · ${m.vet}` : ''}</div>
-                    {m.description && <div style={{ fontSize: 12, color: C.ink, marginTop: 4 }}>{m.description}</div>}
+                    {m.medicine && <div style={{ fontSize: 12, color: C.ink, marginTop: 4 }}>Medicine: {m.medicine}</div>}
                     {m.nextDueDate && (
                       <div style={{ marginTop: 5 }}>
                         <Chip bg={overdue ? C.rustSoft : soon ? C.amberSoft : C.greySoft} fg={overdue ? C.rust : soon ? C.amber : C.grey}>
@@ -1558,12 +1597,14 @@ function HealthScreen({ medical, cowById, onAdd, onExport }) {
                       </div>
                     )}
                   </div>
+                  <ChevronRight size={16} color={C.grey} />
                 </div>
               );
             })}
           </div>
         )}
       </div>
+      {viewing && <HealthDetailModal record={viewing} cow={cowById(viewing.cowId)} onClose={() => setViewing(null)} />}
       <FAB onClick={onAdd} label="Add record" />
     </div>
   );
@@ -1705,25 +1746,70 @@ function HeatForm({ cows, defaultCowId, onClose, onSave }) {
   );
 }
 
+function CowMultiPicker({ cows, selected, onChange }) {
+  const allSelected = cows.length > 0 && selected.length === cows.length;
+  const toggleAll = () => onChange(allSelected ? [] : cows.map((c) => c.id));
+  const toggleOne = (id) => onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+  return (
+    <Field label={`Cows ${selected.length ? `(${selected.length} selected)` : ''}`}>
+      <button
+        type="button"
+        onClick={toggleAll}
+        className="ff-body"
+        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, border: `1.5px solid ${allSelected ? C.green : C.line}`, background: allSelected ? C.greenSoft : '#fff', borderRadius: 10, padding: '9px 12px', marginBottom: 8, fontWeight: 700, fontSize: 12.5, color: allSelected ? C.green : C.ink }}
+      >
+        <div style={{ width: 18, height: 18, borderRadius: 5, border: `1.5px solid ${allSelected ? C.green : C.grey}`, background: allSelected ? C.green : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          {allSelected && <Check size={12} color="#fff" />}
+        </div>
+        Select all {cows.length} cow{cows.length === 1 ? '' : 's'}
+      </button>
+      <div style={{ maxHeight: 220, overflowY: 'auto', border: `1.5px solid ${C.line}`, borderRadius: 10, background: '#fff' }}>
+        {cows.map((c) => {
+          const checked = selected.includes(c.id);
+          return (
+            <button
+              type="button"
+              key={c.id}
+              onClick={() => toggleOne(c.id)}
+              className="ff-body"
+              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, border: 'none', borderBottom: `1px solid ${C.line}`, background: checked ? C.greenSoft : '#fff', padding: '10px 12px', textAlign: 'left' }}
+            >
+              <div style={{ width: 18, height: 18, borderRadius: 5, border: `1.5px solid ${checked ? C.green : C.grey}`, background: checked ? C.green : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                {checked && <Check size={12} color="#fff" />}
+              </div>
+              <span style={{ fontSize: 13, color: C.ink, fontWeight: 600 }}>{c.name}</span>
+              <span style={{ fontSize: 11.5, color: C.sub }}>#{c.tagNumber}</span>
+            </button>
+          );
+        })}
+      </div>
+    </Field>
+  );
+}
+
 function MedicalForm({ cows, defaultCowId, onClose, onSave }) {
-  const [cowId, setCowId] = useState(defaultCowId || '');
+  const [cowIds, setCowIds] = useState(defaultCowId ? [defaultCowId] : []);
   const [date, setDate] = useState(todayStr());
   const [type, setType] = useState(MED_TYPES[0]);
+  const [medicine, setMedicine] = useState('');
   const [description, setDescription] = useState('');
   const [vet, setVet] = useState('');
   const [nextDueDate, setNextDueDate] = useState('');
-  const valid = cowId && date && type;
+  const valid = cowIds.length > 0 && date && type;
   return (
     <Modal title="Add Health Record" onClose={onClose}>
-      {!defaultCowId && <CowPicker cows={cows} value={cowId} onChange={setCowId} />}
+      {!defaultCowId && <CowMultiPicker cows={cows} selected={cowIds} onChange={setCowIds} />}
       <Field label="Date"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} max={todayStr()} /></Field>
       <Field label="Type"><Segmented options={MED_TYPES} value={type} onChange={setType} /></Field>
+      <Field label="Medicine used (optional)"><input value={medicine} onChange={(e) => setMedicine(e.target.value)} placeholder="e.g. Albendazole" style={inputStyle} /></Field>
       <Field label="Details">
         <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What was done / observed" style={{ ...inputStyle, minHeight: 70, resize: 'vertical' }} />
       </Field>
       <Field label="Vet / attended by (optional)"><input value={vet} onChange={(e) => setVet(e.target.value)} placeholder="e.g. Dr. Rao" style={inputStyle} /></Field>
       <Field label="Next follow-up date (optional)"><input type="date" value={nextDueDate} onChange={(e) => setNextDueDate(e.target.value)} style={inputStyle} /></Field>
-      <PrimaryButton disabled={!valid} onClick={() => onSave({ cowId, date, type, description: description.trim(), vet: vet.trim(), nextDueDate })}>Save record</PrimaryButton>
+      <PrimaryButton disabled={!valid} onClick={() => onSave({ cowIds, date, type, medicine: medicine.trim(), description: description.trim(), vet: vet.trim(), nextDueDate })}>
+        Save record{cowIds.length > 1 ? ` for ${cowIds.length} cows` : ''}
+      </PrimaryButton>
     </Modal>
   );
 }
