@@ -3,6 +3,7 @@ import {
   Home, Milk, HeartPulse, Stethoscope, Plus, ArrowLeft, X,
   Calendar, Search, Check, ChevronRight, Trash2, Pencil, Droplet, Syringe, Printer, Download, Wheat, Baby, PackageMinus, PackagePlus, Upload, LogOut, Mail, Lock
 } from 'lucide-react';
+import ReactDOM from 'react-dom';
 import { supabase, configMissing } from './supabaseClient.js';
 
 // ---------- Design tokens ----------
@@ -31,6 +32,7 @@ const FONTS = (
   <style>{`
     @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap');
     html, body, #root { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; }
+    .app-shell { height: 100vh; height: 100dvh; }
     .ff-display { font-family: 'Space Grotesk', sans-serif; }
     .ff-body { font-family: 'Inter', sans-serif; }
     * { -webkit-tap-highlight-color: transparent; }
@@ -425,11 +427,11 @@ const inputStyle = {
 };
 
 function Modal({ title, onClose, children }) {
-  return (
-    <div style={{ position: 'absolute', inset: 0, background: 'rgba(28,46,34,0.45)', zIndex: 50, display: 'flex', alignItems: 'flex-end' }} onClick={onClose}>
+  return ReactDOM.createPortal(
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(28,46,34,0.45)', zIndex: 1000, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={onClose}>
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{ background: C.bg, width: '100%', maxHeight: '86%', overflowY: 'auto', borderRadius: '20px 20px 0 0', padding: 18 }}
+        style={{ background: C.bg, width: '100%', maxWidth: 420, maxHeight: '86%', overflowY: 'auto', borderRadius: '20px 20px 0 0', padding: 18, paddingBottom: 'max(18px, calc(env(safe-area-inset-bottom) + 14px))' }}
       >
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 14 }}>
           <div className="ff-display" style={{ fontWeight: 700, fontSize: 16.5, color: C.ink, flex: 1 }}>{title}</div>
@@ -439,7 +441,8 @@ function Modal({ title, onClose, children }) {
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -691,7 +694,14 @@ export default function App() {
 
   const handleSignOut = async () => { await supabase.auth.signOut(); };
 
+  const onEditHeat = (record) => setModal({ type: 'heat', cowId: record.cowId, editId: record.id });
+  const onDeleteHeat = async (record) => {
+    await supabase.from('heat_records').delete().eq('id', record.id);
+    setHeat(heat.filter((h) => h.id !== record.id));
+  };
+
   const heatStatusFor = (cow) => {
+    if (cow.pregnancyConfirmed) return { status: 'pregnant' };
     const recs = heat.filter((h) => h.cowId === cow.id).sort((a, b) => b.date.localeCompare(a.date));
     if (!recs.length) return { status: 'none' };
     const last = recs[0];
@@ -763,7 +773,7 @@ export default function App() {
   return (
     <>
       {FONTS}
-      <div className="app-shell" style={{ position: 'fixed', inset: 0, display: 'flex', justifyContent: 'center', background: C.bg }}>
+      <div className="app-shell" style={{ display: 'flex', justifyContent: 'center', background: C.bg }}>
         <div className="ff-body" style={{ width: '100%', maxWidth: 420, height: '100%', background: C.bg, position: 'relative', overflow: 'hidden', boxShadow: '0 0 0 1px #00000008', display: 'flex', flexDirection: 'column' }}>
 
           <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
@@ -786,6 +796,8 @@ export default function App() {
               }}
               onAddMilk={() => setModal({ type: 'milk', cowId: openCowId })}
               onAddHeat={() => setModal({ type: 'heat', cowId: openCowId })}
+              onEditHeat={onEditHeat}
+              onDeleteHeat={onDeleteHeat}
               onAddMedical={() => setModal({ type: 'medical', cowId: openCowId })}
               onAddCalf={() => setModal({ type: 'calf', cowId: openCowId })}
               onExport={(kind) => {
@@ -841,7 +853,7 @@ export default function App() {
                 />
               )}
               {tab === 'heat' && (
-                <HeatScreen cows={activeCows} heat={heat} heatStatusFor={heatStatusFor} cowById={cowById} onAdd={() => setModal({ type: 'heat' })} onOpenCow={setOpenCowId} />
+                <HeatScreen cows={activeCows} heat={heat} heatStatusFor={heatStatusFor} cowById={cowById} onAdd={() => setModal({ type: 'heat' })} onOpenCow={setOpenCowId} onEditHeat={onEditHeat} onDeleteHeat={onDeleteHeat} />
               )}
               {tab === 'health' && (
                 <HealthScreen
@@ -921,7 +933,7 @@ export default function App() {
 
           {modal && modal.type === 'milkBatch' && (
             <MilkBatchForm
-              cows={cows} milk={milk}
+              cows={activeCows} milk={milk}
               onClose={() => setModal(null)}
               onSave={async ({ date, session, entries }) => {
                 const toInsert = entries.filter((e) => !e.existingId).map((e) => milkToRow({ cowId: e.cowId, date, session, liters: e.liters }, userId));
@@ -945,10 +957,16 @@ export default function App() {
           {modal && modal.type === 'heat' && (
             <HeatForm
               cows={cows} defaultCowId={modal.cowId}
+              initial={modal.editId ? heat.find((h) => h.id === modal.editId) : null}
               onClose={() => setModal(null)}
               onSave={async (data) => {
-                const { data: row, error } = await supabase.from('heat_records').insert(heatToRow(data, userId)).select().single();
-                if (!error) setHeat([...heat, mapHeatFromRow(row)]);
+                if (modal.editId) {
+                  await supabase.from('heat_records').update(heatToRow(data, userId)).eq('id', modal.editId);
+                  setHeat(heat.map((h) => (h.id === modal.editId ? { ...h, ...data } : h)));
+                } else {
+                  const { data: row, error } = await supabase.from('heat_records').insert(heatToRow(data, userId)).select().single();
+                  if (!error) setHeat([...heat, mapHeatFromRow(row)]);
+                }
                 setModal(null);
               }}
             />
@@ -1227,10 +1245,11 @@ function CowsScreen({ cows, heatStatusFor, onOpenCow, onAdd, onExport }) {
 }
 
 // ---------- Cow detail ----------
-function CowDetail({ cow, milk, heat, medical, calves, heatStatus, insemStatus, onBack, onEdit, onDelete, onAddMilk, onAddHeat, onAddMedical, onAddCalf, onExport }) {
+function CowDetail({ cow, milk, heat, medical, calves, heatStatus, insemStatus, onBack, onEdit, onDelete, onAddMilk, onAddHeat, onAddMedical, onAddCalf, onEditHeat, onDeleteHeat, onExport }) {
   const [sub, setSub] = useState('milk');
   const [confirmDel, setConfirmDel] = useState(false);
   const [viewingMed, setViewingMed] = useState(null);
+  const [viewingHeat, setViewingHeat] = useState(null);
   if (!cow) return null;
   const cowMilk = milk.filter((m) => m.cowId === cow.id).sort((a, b) => b.date.localeCompare(a.date));
   const cowHeat = heat.filter((h) => h.cowId === cow.id).sort((a, b) => b.date.localeCompare(a.date));
@@ -1295,7 +1314,7 @@ function CowDetail({ cow, milk, heat, medical, calves, heatStatus, insemStatus, 
           </div>
         )}
 
-        {heatStatus.status !== 'none' && (
+        {heatStatus.status !== 'none' && heatStatus.status !== 'pregnant' && (
           <div style={{
             marginBottom: 16, borderRadius: 12, padding: 12,
             background: heatStatus.status === 'overdue' ? C.rustSoft : heatStatus.status === 'due' ? C.amberSoft : C.greenSoft,
@@ -1336,13 +1355,14 @@ function CowDetail({ cow, milk, heat, medical, calves, heatStatus, insemStatus, 
             addLabel="Log heat cycle"
             onAdd={onAddHeat}
             render={(h) => (
-              <div key={h.id} style={rowCardStyle}>
+              <div key={h.id} onClick={() => setViewingHeat(h)} style={rowCardStyle}>
                 <div style={{ color: C.rust }}><HeartPulse size={16} /></div>
                 <div style={{ flex: 1, marginLeft: 10 }}>
                   <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{fmtDate(h.date)}</div>
                   {h.notes && <div style={{ fontSize: 11.5, color: C.sub }}>{h.notes}</div>}
                 </div>
                 {h.bred && <Chip bg={C.greenSoft} fg={C.green}>Bred</Chip>}
+                <ChevronRight size={16} color={C.grey} />
               </div>
             )}
           />
@@ -1399,6 +1419,15 @@ function CowDetail({ cow, milk, heat, medical, calves, heatStatus, insemStatus, 
         </Modal>
       )}
       {viewingMed && <HealthDetailModal record={viewingMed} cow={cow} onClose={() => setViewingMed(null)} />}
+      {viewingHeat && (
+        <HeatDetailModal
+          record={viewingHeat}
+          cow={cow}
+          onClose={() => setViewingHeat(null)}
+          onEdit={(r) => { setViewingHeat(null); onEditHeat(r); }}
+          onDelete={(r) => { setViewingHeat(null); onDeleteHeat(r); }}
+        />
+      )}
     </div>
   );
 }
@@ -1483,12 +1512,13 @@ function MilkScreen({ cows, milk, cowById, onAdd, onExport }) {
 }
 
 // ---------- Heat screen ----------
-function HeatScreen({ cows, heat, heatStatusFor, cowById, onAdd, onOpenCow }) {
+function HeatScreen({ cows, heat, heatStatusFor, cowById, onAdd, onOpenCow, onEditHeat, onDeleteHeat }) {
   const rows = cows.map((c) => ({ cow: c, ...heatStatusFor(c) })).sort((a, b) => {
-    const order = { overdue: 0, due: 1, upcoming: 2, none: 3 };
+    const order = { overdue: 0, due: 1, upcoming: 2, pregnant: 3, none: 4 };
     return order[a.status] - order[b.status];
   });
   const recent = heat.slice().sort((a, b) => b.date.localeCompare(a.date)).slice(0, 8);
+  const [viewing, setViewing] = useState(null);
 
   return (
     <div>
@@ -1505,15 +1535,15 @@ function HeatScreen({ cows, heat, heatStatusFor, cowById, onAdd, onOpenCow }) {
                 <div style={{ flex: 1, marginLeft: 10 }}>
                   <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{cow.name}</div>
                   <div style={{ fontSize: 11.5, color: C.sub }}>
-                    {status === 'none' ? 'No heat recorded yet' : status === 'overdue' ? `Overdue by ${Math.abs(daysUntil)}d · expected ${fmtDateShort(nextDate)}` : `Next expected ${fmtDateShort(nextDate)}`}
+                    {status === 'pregnant' ? 'Pregnancy confirmed' : status === 'none' ? 'No heat recorded yet' : status === 'overdue' ? `Overdue by ${Math.abs(daysUntil)}d · expected ${fmtDateShort(nextDate)}` : `Next expected ${fmtDateShort(nextDate)}`}
                   </div>
                 </div>
                 {status !== 'none' && (
                   <Chip
-                    bg={status === 'overdue' ? C.rustSoft : status === 'due' ? C.amberSoft : C.greenSoft}
+                    bg={status === 'overdue' ? C.rustSoft : status === 'due' ? C.amberSoft : status === 'pregnant' ? C.greenSoft : C.greenSoft}
                     fg={status === 'overdue' ? C.rust : status === 'due' ? C.amber : C.green}
                   >
-                    {status === 'overdue' ? 'Overdue' : status === 'due' ? 'Due soon' : `${daysUntil}d`}
+                    {status === 'overdue' ? 'Overdue' : status === 'due' ? 'Due soon' : status === 'pregnant' ? 'Pregnant' : `${daysUntil}d`}
                   </Chip>
                 )}
               </div>
@@ -1529,13 +1559,14 @@ function HeatScreen({ cows, heat, heatStatusFor, cowById, onAdd, onOpenCow }) {
             {recent.map((h) => {
               const cow = cowById(h.cowId);
               return (
-                <div key={h.id} style={rowCardStyle}>
+                <div key={h.id} onClick={() => setViewing(h)} style={rowCardStyle}>
                   <div style={{ color: C.rust }}><HeartPulse size={16} /></div>
                   <div style={{ flex: 1, marginLeft: 10 }}>
                     <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{cow ? cow.name : 'Unknown'}</div>
                     <div style={{ fontSize: 11.5, color: C.sub }}>{fmtDate(h.date)}{h.notes ? ` · ${h.notes}` : ''}</div>
                   </div>
                   {h.bred && <Chip bg={C.greenSoft} fg={C.green}>Bred</Chip>}
+                  <ChevronRight size={16} color={C.grey} />
                 </div>
               );
             })}
@@ -1543,11 +1574,59 @@ function HeatScreen({ cows, heat, heatStatusFor, cowById, onAdd, onOpenCow }) {
         )}
       </div>
       {cows.length > 0 && <FAB onClick={onAdd} label="Log heat" />}
+      {viewing && (
+        <HeatDetailModal
+          record={viewing}
+          cow={cowById(viewing.cowId)}
+          onClose={() => setViewing(null)}
+          onEdit={(r) => { setViewing(null); onEditHeat(r); }}
+          onDelete={(r) => { setViewing(null); onDeleteHeat(r); }}
+        />
+      )}
     </div>
   );
 }
 
 // ---------- Health screen ----------
+function HeatDetailModal({ record, cow, onClose, onEdit, onDelete }) {
+  const [confirmDel, setConfirmDel] = useState(false);
+  if (!record) return null;
+  if (confirmDel) {
+    return (
+      <Modal title="Delete this heat record?" onClose={() => setConfirmDel(false)}>
+        <div style={{ fontSize: 13, color: C.sub, marginBottom: 14 }}>This removes the heat cycle entry from {fmtDate(record.date)}. This can't be undone.</div>
+        <PrimaryButton danger onClick={() => onDelete(record)}>Delete permanently</PrimaryButton>
+      </Modal>
+    );
+  }
+  return (
+    <Modal title="Heat Cycle Record" onClose={onClose}>
+      {cow && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <EarTag number={cow.tagNumber} size="sm" />
+          <div>
+            <div className="ff-display" style={{ fontWeight: 700, fontSize: 14, color: C.ink }}>{cow.name}</div>
+            <div style={{ fontSize: 11.5, color: C.sub }}>{cow.breed}</div>
+          </div>
+        </div>
+      )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 18 }}>
+        <DetailRow label="Date observed" value={fmtDate(record.date)} />
+        <DetailRow label="Bred / inseminated" value={record.bred ? 'Yes' : 'No'} />
+        {record.notes && <DetailRow label="Notes" value={record.notes} />}
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button onClick={() => onEdit(record)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.greenSoft, color: C.green, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 13, fontWeight: 700 }}>
+          <Pencil size={14} /> Edit
+        </button>
+        <button onClick={() => setConfirmDel(true)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.rustSoft, color: C.rust, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 13, fontWeight: 700 }}>
+          <Trash2 size={14} /> Delete
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 function HealthDetailModal({ record, cow, onClose }) {
   if (!record) return null;
   return (
@@ -1819,15 +1898,15 @@ function MilkBatchForm({ cows, milk, onClose, onSave }) {
   );
 }
 
-function HeatForm({ cows, defaultCowId, onClose, onSave }) {
-  const [cowId, setCowId] = useState(defaultCowId || '');
-  const [date, setDate] = useState(todayStr());
-  const [bred, setBred] = useState(false);
-  const [notes, setNotes] = useState('');
+function HeatForm({ cows, defaultCowId, initial, onClose, onSave }) {
+  const [cowId, setCowId] = useState(initial?.cowId || defaultCowId || '');
+  const [date, setDate] = useState(initial?.date || todayStr());
+  const [bred, setBred] = useState(initial?.bred || false);
+  const [notes, setNotes] = useState(initial?.notes || '');
   const valid = cowId && date;
   return (
-    <Modal title="Log Heat Cycle" onClose={onClose}>
-      {!defaultCowId && <CowPicker cows={cows} value={cowId} onChange={setCowId} />}
+    <Modal title={initial ? 'Edit Heat Cycle' : 'Log Heat Cycle'} onClose={onClose}>
+      {!defaultCowId && !initial && <CowPicker cows={cows} value={cowId} onChange={setCowId} />}
       <Field label="Date observed"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} max={todayStr()} /></Field>
       <Field label="Bred this cycle?">
         <button onClick={() => setBred(!bred)} style={{ display: 'flex', alignItems: 'center', gap: 8, border: `1.5px solid ${bred ? C.green : C.line}`, background: bred ? C.greenSoft : '#fff', borderRadius: 10, padding: '9px 12px' }}>
@@ -1838,7 +1917,7 @@ function HeatForm({ cows, defaultCowId, onClose, onSave }) {
         </button>
       </Field>
       <Field label="Notes (optional)"><input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. mild signs, standing heat" style={inputStyle} /></Field>
-      <PrimaryButton disabled={!valid} onClick={() => onSave({ cowId, date, bred, notes: notes.trim() })}>Save entry</PrimaryButton>
+      <PrimaryButton disabled={!valid} onClick={() => onSave({ cowId, date, bred, notes: notes.trim() })}>{initial ? 'Save changes' : 'Save entry'}</PrimaryButton>
     </Modal>
   );
 }
