@@ -1196,7 +1196,10 @@ const rowCardStyle = { background: '#fff', borderRadius: 12, padding: 10, displa
 // ---------- Cows list ----------
 function CowsScreen({ cows, heatStatusFor, onOpenCow, onAdd, onExport }) {
   const [q, setQ] = useState('');
-  const filtered = cows.filter((c) => (c.name + c.tagNumber + c.breed).toLowerCase().includes(q.toLowerCase()));
+  const [statusFilter, setStatusFilter] = useState('All');
+  const filtered = cows
+    .filter((c) => (c.name + c.tagNumber + c.breed).toLowerCase().includes(q.toLowerCase()))
+    .filter((c) => statusFilter === 'All' || c.status === statusFilter.toLowerCase());
   return (
     <div>
       <ScreenHeader
@@ -1209,12 +1212,23 @@ function CowsScreen({ cows, heatStatusFor, onOpenCow, onAdd, onExport }) {
         }
       />
       <div style={{ padding: 16 }}>
-        <div style={{ position: 'relative', marginBottom: 14 }}>
+        <div style={{ position: 'relative', marginBottom: 12 }}>
           <Search size={15} color={C.grey} style={{ position: 'absolute', left: 12, top: 11 }} />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name, tag, breed" style={{ ...inputStyle, paddingLeft: 34 }} />
         </div>
+        <div style={{ marginBottom: 14 }}>
+          <Segmented
+            options={['All', 'Active', 'Dry', 'Sold']}
+            value={statusFilter}
+            onChange={setStatusFilter}
+          />
+        </div>
         {filtered.length === 0 ? (
-          <EmptyState icon={<CowIcon size={30} />} title="No cows yet" subtitle="Add your first cow to start tracking milk, heat cycles, and health records." />
+          cows.length === 0 ? (
+            <EmptyState icon={<CowIcon size={30} />} title="No cows yet" subtitle="Add your first cow to start tracking milk, heat cycles, and health records." />
+          ) : (
+            <MutedNote text={`No ${statusFilter.toLowerCase()} cows found.`} />
+          )
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {filtered.map((cow) => {
@@ -1452,8 +1466,26 @@ function MilkScreen({ cows, milk, cowById, onAdd, onExport }) {
   const [date, setDate] = useState(todayStr());
   const [sessionFilter, setSessionFilter] = useState('Both');
   const dayEntries = milk.filter((m) => m.date === date).sort((a, b) => (a.session > b.session ? 1 : -1));
-  const entries = sessionFilter === 'Both' ? dayEntries : dayEntries.filter((m) => m.session === sessionFilter);
+  const amEntries = dayEntries.filter((m) => m.session === 'AM');
+  const pmEntries = dayEntries.filter((m) => m.session === 'PM');
+  const entries = sessionFilter === 'Both' ? dayEntries : sessionFilter === 'AM' ? amEntries : pmEntries;
+  const amTotal = amEntries.reduce((s, m) => s + Number(m.liters || 0), 0);
+  const pmTotal = pmEntries.reduce((s, m) => s + Number(m.liters || 0), 0);
   const total = entries.reduce((s, m) => s + Number(m.liters || 0), 0);
+
+  const renderEntry = (m) => {
+    const cow = cowById(m.cowId);
+    return (
+      <div key={m.id} style={rowCardStyle}>
+        {cow && <EarTag number={cow.tagNumber} size="sm" />}
+        <div style={{ flex: 1, marginLeft: 10 }}>
+          <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{cow ? cow.name : 'Unknown'}</div>
+          <div style={{ fontSize: 11.5, color: C.sub }}>{m.session} session</div>
+        </div>
+        <div className="ff-display" style={{ fontWeight: 700, fontSize: 15, color: C.milk }}>{m.liters} L</div>
+      </div>
+    );
+  };
 
   return (
     <div>
@@ -1473,37 +1505,60 @@ function MilkScreen({ cows, milk, cowById, onAdd, onExport }) {
         <Field label="Session">
           <Segmented options={['Both', 'AM', 'PM']} value={sessionFilter} onChange={setSessionFilter} />
         </Field>
-        <div style={{ background: C.milkSoft, borderRadius: 14, padding: 14, marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <div className="ff-body" style={{ fontSize: 11.5, color: C.milk, fontWeight: 600 }}>
-              Total for {fmtDate(date)}{sessionFilter !== 'Both' ? ` · ${sessionFilter}` : ''}
-            </div>
-            <div className="ff-display" style={{ fontSize: 24, fontWeight: 700, color: C.milk }}>{total.toFixed(1)} L</div>
-          </div>
-          <Droplet size={26} color={C.milk} />
-        </div>
 
-        <SectionTitle title="Entries" />
+        {sessionFilter === 'Both' ? (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 16 }}>
+            <div style={{ background: C.milkSoft, borderRadius: 12, padding: '10px 8px', textAlign: 'center' }}>
+              <div style={{ fontSize: 10.5, color: C.milk, fontWeight: 600 }}>AM total</div>
+              <div className="ff-display" style={{ fontSize: 17, fontWeight: 700, color: C.milk }}>{amTotal.toFixed(1)} L</div>
+            </div>
+            <div style={{ background: C.milkSoft, borderRadius: 12, padding: '10px 8px', textAlign: 'center' }}>
+              <div style={{ fontSize: 10.5, color: C.milk, fontWeight: 600 }}>PM total</div>
+              <div className="ff-display" style={{ fontSize: 17, fontWeight: 700, color: C.milk }}>{pmTotal.toFixed(1)} L</div>
+            </div>
+            <div style={{ background: C.milk, borderRadius: 12, padding: '10px 8px', textAlign: 'center' }}>
+              <div style={{ fontSize: 10.5, color: '#fff', fontWeight: 600, opacity: 0.85 }}>Day total</div>
+              <div className="ff-display" style={{ fontSize: 17, fontWeight: 700, color: '#fff' }}>{total.toFixed(1)} L</div>
+            </div>
+          </div>
+        ) : (
+          <div style={{ background: C.milkSoft, borderRadius: 14, padding: 14, marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <div className="ff-body" style={{ fontSize: 11.5, color: C.milk, fontWeight: 600 }}>
+                Total for {fmtDate(date)} · {sessionFilter}
+              </div>
+              <div className="ff-display" style={{ fontSize: 24, fontWeight: 700, color: C.milk }}>{total.toFixed(1)} L</div>
+            </div>
+            <Droplet size={26} color={C.milk} />
+          </div>
+        )}
+
         {cows.length === 0 ? (
           <EmptyState icon={<Milk size={30} />} title="Add a cow first" subtitle="You'll need at least one cow profile before logging milk." />
-        ) : entries.length === 0 ? (
-          <MutedNote text={sessionFilter === 'Both' ? 'No milk logged for this date yet.' : `No ${sessionFilter} milk logged for this date yet.`} />
+        ) : sessionFilter === 'Both' ? (
+          <>
+            <SectionTitle title={`AM session (${amTotal.toFixed(1)} L)`} />
+            {amEntries.length === 0 ? (
+              <MutedNote text="No AM milk logged for this date yet." />
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>{amEntries.map(renderEntry)}</div>
+            )}
+            <SectionTitle title={`PM session (${pmTotal.toFixed(1)} L)`} />
+            {pmEntries.length === 0 ? (
+              <MutedNote text="No PM milk logged for this date yet." />
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{pmEntries.map(renderEntry)}</div>
+            )}
+          </>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {entries.map((m) => {
-              const cow = cowById(m.cowId);
-              return (
-                <div key={m.id} style={rowCardStyle}>
-                  {cow && <EarTag number={cow.tagNumber} size="sm" />}
-                  <div style={{ flex: 1, marginLeft: 10 }}>
-                    <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{cow ? cow.name : 'Unknown'}</div>
-                    <div style={{ fontSize: 11.5, color: C.sub }}>{m.session} session</div>
-                  </div>
-                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 15, color: C.milk }}>{m.liters} L</div>
-                </div>
-              );
-            })}
-          </div>
+          <>
+            <SectionTitle title="Entries" />
+            {entries.length === 0 ? (
+              <MutedNote text={`No ${sessionFilter} milk logged for this date yet.`} />
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{entries.map(renderEntry)}</div>
+            )}
+          </>
         )}
       </div>
       {cows.length > 0 && <FAB onClick={onAdd} label="Log milk" />}
