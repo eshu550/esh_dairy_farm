@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
-  Home, Beef, Milk, HeartPulse, Stethoscope, Plus, ArrowLeft, X,
+  Home, Milk, HeartPulse, Stethoscope, Plus, ArrowLeft, X,
   Calendar, Search, Check, ChevronRight, Trash2, Pencil, Droplet, Syringe, Printer, Download, Wheat, Baby, PackageMinus, PackagePlus, Upload, LogOut, Mail, Lock
 } from 'lucide-react';
 import { supabase, configMissing } from './supabaseClient.js';
@@ -30,6 +30,7 @@ const C = {
 const FONTS = (
   <style>{`
     @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+    html, body, #root { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; }
     .ff-display { font-family: 'Space Grotesk', sans-serif; }
     .ff-body { font-family: 'Inter', sans-serif; }
     * { -webkit-tap-highlight-color: transparent; }
@@ -38,6 +39,7 @@ const FONTS = (
     @media print {
       .app-shell { display: none !important; }
       .print-area { display: block !important; }
+      html, body { overflow: visible !important; }
     }
   `}</style>
 );
@@ -120,6 +122,20 @@ function downloadFile(filename, content, mime = 'text/csv;charset=utf-8;') {
 }
 
 // ---------- Ear tag badge (signature element) ----------
+function CowIcon({ size = 20, color = 'currentColor', strokeWidth = 2 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5.5 8.5c-1.4 0-2.5-1-2.5-2.3 0-1 .8-1.7 1.8-1.5.9.2 1.5 1 1.7 1.8" />
+      <path d="M18.5 8.5c1.4 0 2.5-1 2.5-2.3 0-1-.8-1.7-1.8-1.5-.9.2-1.5 1-1.7 1.8" />
+      <path d="M6.5 9.2C6.5 6.8 8.9 5 12 5s5.5 1.8 5.5 4.2c0 1.1-.5 2-1.3 2.7.8.9 1.3 2 1.3 3.3 0 3.2-3.4 5.3-7.5 5.3s-7.5-2.1-7.5-5.3c0-1.3.5-2.4 1.3-3.3-.8-.7-1.3-1.6-1.3-2.7Z" />
+      <path d="M9 13.2c.5.5.5 1.3 0 1.8" />
+      <path d="M15 13.2c-.5.5-.5 1.3 0 1.8" />
+      <circle cx="9.3" cy="10.3" r=".6" fill={color} stroke="none" />
+      <circle cx="14.7" cy="10.3" r=".6" fill={color} stroke="none" />
+    </svg>
+  );
+}
+
 function EarTag({ number, tone = 'green', size = 'md' }) {
   const tones = {
     green: { bg: C.greenSoft, fg: C.green },
@@ -128,6 +144,8 @@ function EarTag({ number, tone = 'green', size = 'md' }) {
   };
   const t = tones[tone] || tones.green;
   const dims = size === 'lg' ? { w: 72, h: 56, fs: 20 } : size === 'sm' ? { w: 40, h: 32, fs: 11 } : { w: 52, h: 40, fs: 14 };
+  const numStr = number == null ? '' : String(number);
+  const displayNum = numStr.length > 3 ? numStr.slice(-3) : numStr;
   return (
     <div
       style={{
@@ -142,6 +160,7 @@ function EarTag({ number, tone = 'green', size = 'md' }) {
         flexShrink: 0,
         border: `1.5px solid ${t.fg}22`,
       }}
+      title={numStr.length > 3 ? `Tag #${numStr}` : undefined}
     >
       <div
         style={{
@@ -157,7 +176,7 @@ function EarTag({ number, tone = 'green', size = 'md' }) {
         }}
       />
       <span className="ff-display" style={{ color: t.fg, fontWeight: 700, fontSize: dims.fs, letterSpacing: 0.5 }}>
-        {number}
+        {displayNum}
       </span>
     </div>
   );
@@ -221,17 +240,32 @@ function CowPrintBody({ job }) {
           {cow.mastitisAntibiotic && <><br />Mastitis antibiotic: {cow.mastitisAntibiotic}</>}
         </div>
       </div>
-      <div style={{ fontWeight: 700, fontSize: 13, margin: '14px 0 6px' }}>Milk Records</div>
-      <PrintTable headers={['Date', 'Session', 'Liters']} rows={milkRows} />
-      <div style={{ fontWeight: 700, fontSize: 13, margin: '14px 0 6px' }}>Heat Cycle Records</div>
-      <PrintTable headers={['Date', 'Bred', 'Notes']} rows={heatRows} />
-      <div style={{ fontWeight: 700, fontSize: 13, margin: '14px 0 6px' }}>Health Records</div>
-      <PrintTable headers={['Date', 'Type', 'Details', 'Vet', 'Next Due']} rows={medRows} />
-      {calfRows && (
+      {milkRows.length > 0 && (
+        <>
+          <div style={{ fontWeight: 700, fontSize: 13, margin: '14px 0 6px' }}>Milk Records</div>
+          <PrintTable headers={['Date', 'Session', 'Liters']} rows={milkRows} />
+        </>
+      )}
+      {heatRows.length > 0 && (
+        <>
+          <div style={{ fontWeight: 700, fontSize: 13, margin: '14px 0 6px' }}>Heat Cycle Records</div>
+          <PrintTable headers={['Date', 'Bred', 'Notes']} rows={heatRows} />
+        </>
+      )}
+      {medRows.length > 0 && (
+        <>
+          <div style={{ fontWeight: 700, fontSize: 13, margin: '14px 0 6px' }}>Health Records</div>
+          <PrintTable headers={['Date', 'Type', 'Details', 'Vet', 'Next Due']} rows={medRows} />
+        </>
+      )}
+      {calfRows && calfRows.length > 0 && (
         <>
           <div style={{ fontWeight: 700, fontSize: 13, margin: '14px 0 6px' }}>Calf Records</div>
           <PrintTable headers={['Date', 'Calf Name', 'Tag #', 'Gender', 'Birth Weight (kg)', 'Notes']} rows={calfRows} />
         </>
+      )}
+      {milkRows.length === 0 && heatRows.length === 0 && medRows.length === 0 && (!calfRows || calfRows.length === 0) && (
+        <div style={{ fontSize: 12, color: '#777', marginTop: 10 }}>No records logged for this cow yet.</div>
       )}
     </div>
   );
@@ -318,7 +352,7 @@ async function fetchTable(table, mapper, orderCol) {
 // ---------- Generic UI atoms ----------
 function HeaderIconButton({ icon, onClick, title }) {
   return (
-    <button onClick={onClick} title={title} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: 10, padding: 6, display: 'flex' }}>
+    <button onClick={onClick} title={title} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: 10, padding: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 34, minHeight: 34, flexShrink: 0 }}>
       {icon}
     </button>
   );
@@ -326,14 +360,14 @@ function HeaderIconButton({ icon, onClick, title }) {
 
 function ScreenHeader({ title, subtitle, onBack, right }) {
   return (
-    <div style={{ background: C.green, color: '#fff', padding: '18px 18px 16px' }}>
+    <div style={{ background: C.green, color: '#fff', padding: '18px 18px 16px', paddingTop: 'max(18px, calc(env(safe-area-inset-top) + 12px))' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         {onBack && (
-          <button onClick={onBack} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: 10, padding: 6, display: 'flex' }}>
+          <button onClick={onBack} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: 10, padding: 8, display: 'flex', minWidth: 34, minHeight: 34, alignItems: 'center', justifyContent: 'center' }}>
             <ArrowLeft size={18} color="#fff" />
           </button>
         )}
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div className="ff-display" style={{ fontSize: 19, fontWeight: 700 }}>{title}</div>
           {subtitle && <div className="ff-body" style={{ fontSize: 12.5, opacity: 0.75, marginTop: 1 }}>{subtitle}</div>}
         </div>
@@ -477,7 +511,7 @@ function AuthScreen() {
       <div className="ff-body" style={{ width: '100%', maxWidth: 420, padding: 24, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
         <div style={{ textAlign: 'center', marginBottom: 28 }}>
           <div style={{ width: 56, height: 56, borderRadius: 16, background: C.greenSoft, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
-            <Beef size={28} color={C.green} />
+            <CowIcon size={28} color={C.green} />
           </div>
           <div className="ff-display" style={{ fontWeight: 700, fontSize: 20, color: C.ink }}>Dairy Farm Manager</div>
           <div style={{ fontSize: 12.5, color: C.sub, marginTop: 4 }}>{mode === 'login' ? 'Log in to your farm' : 'Create your account'}</div>
@@ -686,7 +720,7 @@ export default function App() {
 
   if (configMissing) {
     return (
-      <div style={{ minHeight: 480, display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.bg, padding: 24 }}>
+      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.bg, padding: 24 }}>
         {FONTS}
         <div className="ff-body" style={{ maxWidth: 380, textAlign: 'center', color: C.ink }}>
           <div className="ff-display" style={{ fontWeight: 700, fontSize: 16, marginBottom: 8 }}>Setup needed</div>
@@ -700,7 +734,7 @@ export default function App() {
 
   if (session === undefined) {
     return (
-      <div style={{ minHeight: 480, display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.bg }}>
+      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.bg }}>
         {FONTS}
         <div className="ff-body" style={{ color: C.sub, fontSize: 13 }}>Loading…</div>
       </div>
@@ -713,7 +747,7 @@ export default function App() {
 
   if (!loaded) {
     return (
-      <div style={{ minHeight: 480, display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.bg }}>
+      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.bg }}>
         {FONTS}
         <div className="ff-body" style={{ color: C.sub, fontSize: 13 }}>Loading your farm…</div>
       </div>
@@ -723,9 +757,10 @@ export default function App() {
   return (
     <>
       {FONTS}
-      <div className="app-shell" style={{ display: 'flex', justifyContent: 'center', background: C.bg, minHeight: 600 }}>
-        <div className="ff-body" style={{ width: '100%', maxWidth: 420, background: C.bg, minHeight: 600, position: 'relative', overflow: 'hidden', boxShadow: '0 0 0 1px #00000008' }}>
+      <div className="app-shell" style={{ position: 'fixed', inset: 0, display: 'flex', justifyContent: 'center', background: C.bg }}>
+        <div className="ff-body" style={{ width: '100%', maxWidth: 420, height: '100%', background: C.bg, position: 'relative', overflow: 'hidden', boxShadow: '0 0 0 1px #00000008', display: 'flex', flexDirection: 'column' }}>
 
+          <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
           {openCowId ? (
             <CowDetail
               cow={cowById(openCowId)}
@@ -757,15 +792,14 @@ export default function App() {
                 if (kind === 'print') {
                   setPrintJob({ type: 'cow', title: `${cow.name} — Full Record`, cow, milkRows, heatRows, medRows, calfRows });
                 } else {
-                  const csv = [
-                    `${cow.name} — Tag #${cow.tagNumber}`,
-                    `Breed: ${cow.breed}, DOB: ${fmtDate(cow.dob)}, Status: ${cow.status}`,
-                    '', 'MILK RECORDS', toCSV(['Date', 'Session', 'Liters'], milkRows),
-                    '', 'HEAT RECORDS', toCSV(['Date', 'Bred', 'Notes'], heatRows),
-                    '', 'HEALTH RECORDS', toCSV(['Date', 'Type', 'Details', 'Vet', 'Next Due'], medRows),
-                    '', 'CALF RECORDS', toCSV(['Date', 'Calf Name', 'Tag #', 'Gender', 'Birth Weight (kg)', 'Notes'], calfRows),
-                  ].join('\n');
-                  downloadFile(`${cow.name.replace(/\s+/g, '_')}_record.csv`, csv);
+                  const sections = [];
+                  sections.push(`${cow.name} — Tag #${cow.tagNumber}`);
+                  sections.push(`Breed: ${cow.breed}, DOB: ${fmtDate(cow.dob)}, Status: ${cow.status}`);
+                  if (milkRows.length) sections.push('', 'MILK RECORDS', toCSV(['Date', 'Session', 'Liters'], milkRows));
+                  if (heatRows.length) sections.push('', 'HEAT RECORDS', toCSV(['Date', 'Bred', 'Notes'], heatRows));
+                  if (medRows.length) sections.push('', 'HEALTH RECORDS', toCSV(['Date', 'Type', 'Details', 'Vet', 'Next Due'], medRows));
+                  if (calfRows.length) sections.push('', 'CALF RECORDS', toCSV(['Date', 'Calf Name', 'Tag #', 'Gender', 'Birth Weight (kg)', 'Notes'], calfRows));
+                  downloadFile(`${cow.name.replace(/\s+/g, '_')}_record.csv`, sections.join('\n'));
                 }
               }}
             />
@@ -845,6 +879,7 @@ export default function App() {
               )}
             </div>
           )}
+          </div>
 
           {!openCowId && <BottomNav tab={tab} setTab={setTab} />}
 
@@ -973,14 +1008,14 @@ export default function App() {
 function BottomNav({ tab, setTab }) {
   const items = [
     { key: 'home', label: 'Home', icon: Home },
-    { key: 'cows', label: 'Cows', icon: Beef },
+    { key: 'cows', label: 'Cows', icon: CowIcon },
     { key: 'milk', label: 'Milk', icon: Milk },
     { key: 'heat', label: 'Heat', icon: HeartPulse },
     { key: 'health', label: 'Health', icon: Stethoscope },
     { key: 'feed', label: 'Feed', icon: Wheat },
   ];
   return (
-    <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: '#fff', borderTop: `1px solid ${C.line}`, display: 'flex', padding: '8px 4px 10px', zIndex: 30 }}>
+    <div style={{ flexShrink: 0, background: '#fff', borderTop: `1px solid ${C.line}`, display: 'flex', padding: '8px 4px', paddingBottom: 'max(10px, calc(env(safe-area-inset-bottom) + 6px))', zIndex: 30 }}>
       {items.map(({ key, label, icon: Icon }) => {
         const active = tab === key;
         return (
@@ -988,7 +1023,7 @@ function BottomNav({ tab, setTab }) {
             key={key}
             onClick={() => setTab(key)}
             className="ff-body"
-            style={{ flex: 1, background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, color: active ? C.green : C.grey }}
+            style={{ flex: 1, background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, color: active ? C.green : C.grey, padding: '4px 0', minHeight: 44 }}
           >
             <Icon size={20} strokeWidth={active ? 2.4 : 2} />
             <span style={{ fontSize: 10.5, fontWeight: active ? 700 : 500 }}>{label}</span>
@@ -1004,7 +1039,7 @@ function HomeScreen({ cows, milkToday, heatAlerts, medDue, insemAlerts, onOpenCo
   return (
     <div>
       <ScreenHeader
-        title="Your Farm" subtitle={`${cows.length} cow${cows.length === 1 ? '' : 's'} on record`}
+        title="Esh Farm" subtitle={`${cows.length} cow${cows.length === 1 ? '' : 's'} on record`}
         right={
           <div style={{ display: 'flex', gap: 6 }}>
             <HeaderIconButton title="Backup all data" icon={<Download size={15} color="#fff" />} onClick={onBackup} />
@@ -1020,7 +1055,7 @@ function HomeScreen({ cows, milkToday, heatAlerts, medDue, insemAlerts, onOpenCo
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 18 }}>
           <StatCard label="Milk today" value={`${milkToday.toFixed(1)} L`} bg={C.milkSoft} fg={C.milk} icon={<Droplet size={16} />} onClick={() => onGoTab('milk')} />
-          <StatCard label="Active cows" value={cows.filter((c) => c.status === 'active').length} bg={C.greenSoft} fg={C.green} icon={<Beef size={16} />} onClick={() => onGoTab('cows')} />
+          <StatCard label="Active cows" value={cows.filter((c) => c.status === 'active').length} bg={C.greenSoft} fg={C.green} icon={<CowIcon size={16} />} onClick={() => onGoTab('cows')} />
           <StatCard label="Heat alerts" value={heatAlerts.length} bg={C.rustSoft} fg={C.rust} icon={<HeartPulse size={16} />} onClick={() => onGoTab('heat')} />
           <StatCard label="Health due" value={medDue.length} bg={C.amberSoft} fg={C.amber} icon={<Stethoscope size={16} />} onClick={() => onGoTab('health')} />
         </div>
@@ -1130,7 +1165,7 @@ function CowsScreen({ cows, heatStatusFor, onOpenCow, onAdd, onExport }) {
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name, tag, breed" style={{ ...inputStyle, paddingLeft: 34 }} />
         </div>
         {filtered.length === 0 ? (
-          <EmptyState icon={<Beef size={30} />} title="No cows yet" subtitle="Add your first cow to start tracking milk, heat cycles, and health records." />
+          <EmptyState icon={<CowIcon size={30} />} title="No cows yet" subtitle="Add your first cow to start tracking milk, heat cycles, and health records." />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {filtered.map((cow) => {
@@ -1178,8 +1213,8 @@ function CowDetail({ cow, milk, heat, medical, calves, heatStatus, insemStatus, 
         onBack={onBack}
         right={
           <div style={{ display: 'flex', gap: 6 }}>
-            <button onClick={onEdit} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: 10, padding: 6 }}><Pencil size={15} color="#fff" /></button>
-            <button onClick={() => setConfirmDel(true)} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: 10, padding: 6 }}><Trash2 size={15} color="#fff" /></button>
+            <button onClick={onEdit} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: 10, padding: 8, minWidth: 34, minHeight: 34, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Pencil size={15} color="#fff" /></button>
+            <button onClick={() => setConfirmDel(true)} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: 10, padding: 8, minWidth: 34, minHeight: 34, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Trash2 size={15} color="#fff" /></button>
           </div>
         }
       />
