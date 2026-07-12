@@ -148,6 +148,7 @@ function EarTag({ number, tone = 'green', size = 'md' }) {
     green: { bg: C.greenSoft, fg: C.green },
     brown: { bg: C.brownSoft, fg: C.brown },
     grey: { bg: C.greySoft, fg: C.grey },
+    amber: { bg: C.amberSoft, fg: C.amber },
   };
   const t = tones[tone] || tones.green;
   const dims = size === 'lg' ? { w: 72, h: 56, fs: 20 } : size === 'sm' ? { w: 40, h: 32, fs: 11 } : { w: 52, h: 40, fs: 14 };
@@ -189,11 +190,14 @@ function EarTag({ number, tone = 'green', size = 'md' }) {
   );
 }
 
+const earTagTone = (status) => (status === 'active' ? 'green' : status === 'dry' ? 'brown' : status === 'calf' ? 'amber' : 'grey');
+
 function StatusPill({ status }) {
   const map = {
     active: { bg: C.greenSoft, fg: C.green, label: 'Active' },
     dry: { bg: C.brownSoft, fg: C.brown, label: 'Dry' },
     sold: { bg: C.greySoft, fg: C.grey, label: 'Sold' },
+    calf: { bg: C.amberSoft, fg: C.amber, label: 'Calf' },
   };
   const s = map[status] || map.active;
   return (
@@ -234,7 +238,7 @@ function PrintTable({ headers, rows }) {
 }
 
 function CowPrintBody({ job }) {
-  const { cow, milkRows, heatRows, medRows, calfRows } = job;
+  const { cow, milkRows, heatRows, medRows } = job;
   return (
     <div>
       <div style={{ marginBottom: 16 }}>
@@ -266,13 +270,7 @@ function CowPrintBody({ job }) {
           <PrintTable headers={['Date', 'Type', 'Medicine', 'Details', 'Vet', 'Next Due']} rows={medRows} />
         </>
       )}
-      {calfRows && calfRows.length > 0 && (
-        <>
-          <div style={{ fontWeight: 700, fontSize: 13, margin: '14px 0 6px' }}>Calf Records</div>
-          <PrintTable headers={['Date', 'Calf Name', 'Tag #', 'Gender', 'Birth Weight (kg)', 'Notes']} rows={calfRows} />
-        </>
-      )}
-      {milkRows.length === 0 && heatRows.length === 0 && medRows.length === 0 && (!calfRows || calfRows.length === 0) && (
+      {milkRows.length === 0 && heatRows.length === 0 && medRows.length === 0 && (
         <div style={{ fontSize: 12, color: '#777', marginTop: 10 }}>No records logged for this cow yet.</div>
       )}
     </div>
@@ -305,9 +303,15 @@ function PrintDocument({ job }) {
 
 // ---------- Export row builders ----------
 function cowsExportRows(cows) {
-  return cows.map((c) => [c.tagNumber, c.name, c.breed, fmtDate(c.dob), c.status, c.calvingDate ? fmtDate(c.calvingDate) : '', c.firstHeatDate ? fmtDate(c.firstHeatDate) : '', c.inseminatedOn ? fmtDate(c.inseminatedOn) : '', c.mastitisAntibiotic || '']);
+  const nameById = Object.fromEntries(cows.map((c) => [c.id, c.name]));
+  return cows.map((c) => [
+    c.tagNumber, c.name, c.breed, c.gender || '', fmtDate(c.dob), c.status,
+    c.motherCowId ? (nameById[c.motherCowId] || '') : '', c.birthWeight || '',
+    c.calvingDate ? fmtDate(c.calvingDate) : '', c.firstHeatDate ? fmtDate(c.firstHeatDate) : '',
+    c.inseminatedOn ? fmtDate(c.inseminatedOn) : '', c.mastitisAntibiotic || '',
+  ]);
 }
-const COWS_HEADERS = ['Tag #', 'Name', 'Breed', 'Date of Birth', 'Status', 'Last Calving', 'First Heat After Calving', 'Inseminated On', 'Mastitis Antibiotic'];
+const COWS_HEADERS = ['Tag #', 'Name', 'Breed', 'Gender', 'Date of Birth', 'Status', 'Mother', 'Birth Weight (kg)', 'Last Calving', 'First Heat After Calving', 'Inseminated On', 'Mastitis Antibiotic'];
 
 function milkExportRows(milk, cowById) {
   return milk.slice().sort((a, b) => a.date.localeCompare(b.date)).map((m) => {
@@ -330,11 +334,13 @@ const mapCowFromRow = (r) => ({
   id: r.id, name: r.name, tagNumber: r.tag_number, breed: r.breed, dob: r.dob, status: r.status,
   cycleLength: r.cycle_length, calvingDate: r.calving_date || '', firstHeatDate: r.first_heat_date || '',
   inseminatedOn: r.inseminated_on || '', pregnancyConfirmed: !!r.pregnancy_confirmed, mastitisAntibiotic: r.mastitis_antibiotic || '',
+  motherCowId: r.mother_cow_id || '', birthWeight: r.birth_weight ?? '', gender: r.gender || '',
 });
 const cowToRow = (c, userId) => ({
   user_id: userId, name: c.name, tag_number: c.tagNumber, breed: c.breed, dob: c.dob || null, status: c.status,
   cycle_length: c.cycleLength, calving_date: c.calvingDate || null, first_heat_date: c.firstHeatDate || null,
   inseminated_on: c.inseminatedOn || null, pregnancy_confirmed: !!c.pregnancyConfirmed, mastitis_antibiotic: c.mastitisAntibiotic || null,
+  mother_cow_id: c.motherCowId || null, birth_weight: c.birthWeight === '' || c.birthWeight == null ? null : c.birthWeight, gender: c.gender || null,
 });
 const mapMilkFromRow = (r) => ({ id: r.id, cowId: r.cow_id, date: r.date, session: r.session, liters: r.liters });
 const milkToRow = (m, userId) => ({ user_id: userId, cow_id: m.cowId, date: m.date, session: m.session, liters: m.liters });
@@ -342,8 +348,6 @@ const mapHeatFromRow = (r) => ({ id: r.id, cowId: r.cow_id, date: r.date, bred: 
 const heatToRow = (h, userId) => ({ user_id: userId, cow_id: h.cowId, date: h.date, bred: !!h.bred, notes: h.notes || null });
 const mapMedFromRow = (r) => ({ id: r.id, cowId: r.cow_id, date: r.date, type: r.type, medicine: r.medicine || '', description: r.description || '', vet: r.vet || '', nextDueDate: r.next_due_date || '' });
 const medToRow = (m, userId) => ({ user_id: userId, cow_id: m.cowId, date: m.date, type: m.type, medicine: m.medicine || null, description: m.description || null, vet: m.vet || null, next_due_date: m.nextDueDate || null });
-const mapCalfFromRow = (r) => ({ id: r.id, cowId: r.cow_id, date: r.date, calfName: r.calf_name || '', calfTagNumber: r.calf_tag_number || '', gender: r.gender || '', birthWeight: r.birth_weight ?? '', notes: r.notes || '' });
-const calfToRow = (c, userId) => ({ user_id: userId, cow_id: c.cowId, date: c.date, calf_name: c.calfName || null, calf_tag_number: c.calfTagNumber || null, gender: c.gender || null, birth_weight: c.birthWeight === '' ? null : c.birthWeight, notes: c.notes || null });
 const mapFeedTypeFromRow = (r) => ({ id: r.id, name: r.name, costPerBag: r.cost_per_bag });
 const feedTypeToRow = (f, userId) => ({ user_id: userId, name: f.name, cost_per_bag: f.costPerBag });
 const mapFeedTxnFromRow = (r) => ({ id: r.id, feedTypeId: r.feed_type_id, date: r.date, kind: r.kind, bags: r.bags, cost: r.cost, notes: r.notes || '' });
@@ -564,7 +568,6 @@ export default function App() {
   const [milk, setMilk] = useState([]);
   const [heat, setHeat] = useState([]);
   const [medical, setMedical] = useState([]);
-  const [calves, setCalves] = useState([]);
   const [feedTypes, setFeedTypes] = useState([]);
   const [feedTransactions, setFeedTransactions] = useState([]);
   const [tab, setTab] = useState('home');
@@ -577,7 +580,7 @@ export default function App() {
   const fileInputRef = useRef(null);
 
   const handleBackupClick = () => {
-    const payload = { cows, milk, heat, medical, calves, feedTypes, feedTransactions, exportedAt: new Date().toISOString() };
+    const payload = { cows, milk, heat, medical, feedTypes, feedTransactions, exportedAt: new Date().toISOString() };
     downloadFile(`farm_backup_${todayStr()}.json`, JSON.stringify(payload, null, 2), 'application/json');
   };
 
@@ -608,15 +611,20 @@ export default function App() {
       await supabase.from('milk_records').delete().eq('user_id', userId);
       await supabase.from('heat_records').delete().eq('user_id', userId);
       await supabase.from('medical_records').delete().eq('user_id', userId);
-      await supabase.from('calf_records').delete().eq('user_id', userId);
       await supabase.from('feed_transactions').delete().eq('user_id', userId);
       await supabase.from('feed_types').delete().eq('user_id', userId);
       await supabase.from('cows').delete().eq('user_id', userId);
 
       const cowIdMap = {};
       for (const c of restorePending.cows || []) {
-        const { data, error } = await supabase.from('cows').insert(cowToRow(c, userId)).select().single();
+        const { data, error } = await supabase.from('cows').insert(cowToRow({ ...c, motherCowId: '' }, userId)).select().single();
         if (!error) cowIdMap[c.id] = data.id;
+      }
+      // second pass: now that every cow has a new id, wire up mother references
+      for (const c of restorePending.cows || []) {
+        if (c.motherCowId && cowIdMap[c.motherCowId] && cowIdMap[c.id]) {
+          await supabase.from('cows').update({ mother_cow_id: cowIdMap[c.motherCowId] }).eq('id', cowIdMap[c.id]);
+        }
       }
       const feedTypeIdMap = {};
       for (const f of restorePending.feedTypes || []) {
@@ -634,10 +642,6 @@ export default function App() {
       for (const med of restorePending.medical || []) {
         const cid = cowIdMap[med.cowId]; if (!cid) continue;
         await supabase.from('medical_records').insert(medToRow({ ...med, cowId: cid }, userId));
-      }
-      for (const cal of restorePending.calves || []) {
-        const cid = cowIdMap[cal.cowId]; if (!cid) continue;
-        await supabase.from('calf_records').insert(calfToRow({ ...cal, cowId: cid }, userId));
       }
       for (const t of restorePending.feedTransactions || []) {
         const fid = feedTypeIdMap[t.feedTypeId]; if (!fid) continue;
@@ -669,16 +673,15 @@ export default function App() {
 
   const loadAllData = async () => {
     try {
-      const [c, m, h, med, cal, ft, tx] = await Promise.all([
+      const [c, m, h, med, ft, tx] = await Promise.all([
         fetchTable('cows', mapCowFromRow),
         fetchTable('milk_records', mapMilkFromRow, 'date'),
         fetchTable('heat_records', mapHeatFromRow, 'date'),
         fetchTable('medical_records', mapMedFromRow, 'date'),
-        fetchTable('calf_records', mapCalfFromRow, 'date'),
         fetchTable('feed_types', mapFeedTypeFromRow),
         fetchTable('feed_transactions', mapFeedTxnFromRow, 'date'),
       ]);
-      setCows(c); setMilk(m); setHeat(h); setMedical(med); setCalves(cal); setFeedTypes(ft); setFeedTransactions(tx);
+      setCows(c); setMilk(m); setHeat(h); setMedical(med); setFeedTypes(ft); setFeedTransactions(tx);
     } catch (e) {
       console.error('Failed to load data', e);
     }
@@ -687,7 +690,7 @@ export default function App() {
 
   useEffect(() => {
     if (session) { setLoaded(false); loadAllData(); }
-    else if (session === null) { setCows([]); setMilk([]); setHeat([]); setMedical([]); setCalves([]); setFeedTypes([]); setFeedTransactions([]); setLoaded(true); }
+    else if (session === null) { setCows([]); setMilk([]); setHeat([]); setMedical([]); setFeedTypes([]); setFeedTransactions([]); setLoaded(true); }
   }, [session]);
 
   const userId = session?.user?.id;
@@ -780,7 +783,7 @@ export default function App() {
           {openCowId ? (
             <CowDetail
               cow={cowById(openCowId)}
-              milk={milk} heat={heat} medical={medical} calves={calves}
+              milk={milk} heat={heat} medical={medical} allCows={cows}
               heatStatus={heatStatusFor(cowById(openCowId))}
               insemStatus={inseminationStatusFor(cowById(openCowId))}
               onBack={() => setOpenCowId(null)}
@@ -791,7 +794,6 @@ export default function App() {
                 setMilk(milk.filter((m) => m.cowId !== openCowId));
                 setHeat(heat.filter((h) => h.cowId !== openCowId));
                 setMedical(medical.filter((m) => m.cowId !== openCowId));
-                setCalves(calves.filter((c) => c.cowId !== openCowId));
                 setOpenCowId(null);
               }}
               onAddMilk={() => setModal({ type: 'milk', cowId: openCowId })}
@@ -799,16 +801,16 @@ export default function App() {
               onEditHeat={onEditHeat}
               onDeleteHeat={onDeleteHeat}
               onAddMedical={() => setModal({ type: 'medical', cowId: openCowId })}
-              onAddCalf={() => setModal({ type: 'calf', cowId: openCowId })}
+              onAddCalf={() => setModal({ type: 'cow', defaultStatus: 'calf', defaultMotherId: openCowId })}
+              onOpenCow={setOpenCowId}
               onExport={(kind) => {
                 const cow = cowById(openCowId);
                 if (!cow) return;
                 const milkRows = milk.filter((m) => m.cowId === cow.id).sort((a, b) => a.date.localeCompare(b.date)).map((m) => [fmtDate(m.date), m.session, m.liters]);
                 const heatRows = heat.filter((h) => h.cowId === cow.id).sort((a, b) => a.date.localeCompare(b.date)).map((h) => [fmtDate(h.date), h.bred ? 'Yes' : 'No', h.notes || '']);
                 const medRows = medical.filter((m) => m.cowId === cow.id).sort((a, b) => a.date.localeCompare(b.date)).map((m) => [fmtDate(m.date), m.type, m.medicine || '', m.description || '', m.vet || '', m.nextDueDate ? fmtDate(m.nextDueDate) : '']);
-                const calfRows = calves.filter((c) => c.cowId === cow.id).sort((a, b) => a.date.localeCompare(b.date)).map((c) => [fmtDate(c.date), c.calfName || '', c.calfTagNumber || '', c.gender || '', c.birthWeight || '', c.notes || '']);
                 if (kind === 'print') {
-                  setPrintJob({ type: 'cow', title: `${cow.name} — Full Record`, cow, milkRows, heatRows, medRows, calfRows });
+                  setPrintJob({ type: 'cow', title: `${cow.name} — Full Record`, cow, milkRows, heatRows, medRows });
                 } else {
                   const sections = [];
                   sections.push(`${cow.name} — Tag #${cow.tagNumber}`);
@@ -817,7 +819,6 @@ export default function App() {
                   if (milkRows.length) sections.push('', 'MILK RECORDS', toCSV(['Date', 'Session', 'Liters'], milkRows));
                   if (heatRows.length) sections.push('', 'HEAT RECORDS', toCSV(['Date', 'Bred', 'Notes'], heatRows));
                   if (medRows.length) sections.push('', 'HEALTH RECORDS', toCSV(['Date', 'Type', 'Medicine', 'Details', 'Vet', 'Next Due'], medRows));
-                  if (calfRows.length) sections.push('', 'CALF RECORDS', toCSV(['Date', 'Calf Name', 'Tag #', 'Gender', 'Birth Weight (kg)', 'Notes'], calfRows));
                   downloadFile(`${cow.name.replace(/\s+/g, '_')}_record.csv`, sections.join('\n'));
                 }
               }}
@@ -834,11 +835,13 @@ export default function App() {
               )}
               {tab === 'cows' && (
                 <CowsScreen
-                  cows={cows} heatStatusFor={heatStatusFor} onOpenCow={setOpenCowId} onAdd={() => setModal({ type: 'cow' })}
+                  cows={cows} heatStatusFor={heatStatusFor} onOpenCow={setOpenCowId}
+                  onAddCow={() => setModal({ type: 'cow', defaultStatus: 'active' })}
+                  onAddCalf={() => setModal({ type: 'cow', defaultStatus: 'calf' })}
                   onExport={(kind) => {
                     const rows = cowsExportRows(cows);
-                    if (kind === 'print') setPrintJob({ type: 'list', title: 'Herd — Cow Details', headers: COWS_HEADERS, rows });
-                    else downloadFile('cow_details.csv', toCSV(COWS_HEADERS, rows));
+                    if (kind === 'print') setPrintJob({ type: 'list', title: 'Herd — Animal Details', headers: COWS_HEADERS, rows });
+                    else downloadFile('animal_details.csv', toCSV(COWS_HEADERS, rows));
                   }}
                 />
               )}
@@ -905,6 +908,9 @@ export default function App() {
           {modal && modal.type === 'cow' && (
             <CowForm
               initial={modal.editId ? cowById(modal.editId) : null}
+              defaultStatus={modal.defaultStatus}
+              defaultMotherId={modal.defaultMotherId}
+              cows={cows}
               onClose={() => setModal(null)}
               onSave={async (data) => {
                 if (modal.editId) {
@@ -956,7 +962,7 @@ export default function App() {
 
           {modal && modal.type === 'heat' && (
             <HeatForm
-              cows={cows} defaultCowId={modal.cowId}
+              cows={activeCows} defaultCowId={modal.cowId}
               initial={modal.editId ? heat.find((h) => h.id === modal.editId) : null}
               onClose={() => setModal(null)}
               onSave={async (data) => {
@@ -980,17 +986,6 @@ export default function App() {
                 const rowsToInsert = cowIds.map((cid) => medToRow({ ...rest, cowId: cid }, userId));
                 const { data: rows, error } = await supabase.from('medical_records').insert(rowsToInsert).select();
                 if (!error && rows) setMedical([...medical, ...rows.map(mapMedFromRow)]);
-                setModal(null);
-              }}
-            />
-          )}
-
-          {modal && modal.type === 'calf' && (
-            <CalfForm
-              onClose={() => setModal(null)}
-              onSave={async (data) => {
-                const { data: row, error } = await supabase.from('calf_records').insert(calfToRow({ ...data, cowId: modal.cowId }, userId)).select().single();
-                if (!error) setCalves([...calves, mapCalfFromRow(row)]);
                 setModal(null);
               }}
             />
@@ -1057,7 +1052,7 @@ export default function App() {
 function BottomNav({ tab, setTab }) {
   const items = [
     { key: 'home', label: 'Home', icon: Home },
-    { key: 'cows', label: 'Cows', icon: CowIcon },
+    { key: 'cows', label: 'Animals', icon: CowIcon },
     { key: 'milk', label: 'Milk', icon: Milk },
     { key: 'heat', label: 'Heat', icon: HeartPulse },
     { key: 'health', label: 'Health', icon: Stethoscope },
@@ -1194,16 +1189,17 @@ function MutedNote({ text }) {
 const rowCardStyle = { background: '#fff', borderRadius: 12, padding: 10, display: 'flex', alignItems: 'center', border: `1px solid ${C.line}`, cursor: 'pointer' };
 
 // ---------- Cows list ----------
-function CowsScreen({ cows, heatStatusFor, onOpenCow, onAdd, onExport }) {
+function CowsScreen({ cows, heatStatusFor, onOpenCow, onAddCow, onAddCalf, onExport }) {
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
+  const nameById = Object.fromEntries(cows.map((c) => [c.id, c.name]));
   const filtered = cows
     .filter((c) => (c.name + c.tagNumber + c.breed).toLowerCase().includes(q.toLowerCase()))
     .filter((c) => statusFilter === 'All' || c.status === statusFilter.toLowerCase());
   return (
     <div>
       <ScreenHeader
-        title="Cows" subtitle={`${cows.length} in herd`}
+        title="Animals" subtitle={`${cows.length} on the farm`}
         right={
           <div style={{ display: 'flex', gap: 6 }}>
             <HeaderIconButton title="Print herd list" icon={<Printer size={15} color="#fff" />} onClick={() => onExport('print')} />
@@ -1212,22 +1208,38 @@ function CowsScreen({ cows, heatStatusFor, onOpenCow, onAdd, onExport }) {
         }
       />
       <div style={{ padding: 16 }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+          <button
+            onClick={onAddCow}
+            className="ff-body"
+            style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.green, color: '#fff', border: 'none', borderRadius: 12, padding: '11px 0', fontWeight: 700, fontSize: 13 }}
+          >
+            <Plus size={15} /> Add cow
+          </button>
+          <button
+            onClick={onAddCalf}
+            className="ff-body"
+            style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.amberSoft, color: C.amber, border: 'none', borderRadius: 12, padding: '11px 0', fontWeight: 700, fontSize: 13 }}
+          >
+            <Baby size={15} /> Add calf
+          </button>
+        </div>
         <div style={{ position: 'relative', marginBottom: 12 }}>
           <Search size={15} color={C.grey} style={{ position: 'absolute', left: 12, top: 11 }} />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name, tag, breed" style={{ ...inputStyle, paddingLeft: 34 }} />
         </div>
         <div style={{ marginBottom: 14 }}>
           <Segmented
-            options={['All', 'Active', 'Dry', 'Sold']}
+            options={['All', 'Active', 'Dry', 'Calf', 'Sold']}
             value={statusFilter}
             onChange={setStatusFilter}
           />
         </div>
         {filtered.length === 0 ? (
           cows.length === 0 ? (
-            <EmptyState icon={<CowIcon size={30} />} title="No cows yet" subtitle="Add your first cow to start tracking milk, heat cycles, and health records." />
+            <EmptyState icon={<CowIcon size={30} />} title="No animals yet" subtitle="Add your first cow — or log a calf — to start tracking milk, heat cycles, and health records." />
           ) : (
-            <MutedNote text={`No ${statusFilter.toLowerCase()} cows found.`} />
+            <MutedNote text={`No ${statusFilter.toLowerCase()} animals found.`} />
           )
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1235,11 +1247,14 @@ function CowsScreen({ cows, heatStatusFor, onOpenCow, onAdd, onExport }) {
               const hs = heatStatusFor(cow);
               return (
                 <div key={cow.id} onClick={() => onOpenCow(cow.id)} style={{ ...rowCardStyle, padding: 12 }}>
-                  <EarTag number={cow.tagNumber} tone={cow.status === 'active' ? 'green' : cow.status === 'dry' ? 'brown' : 'grey'} />
+                  <EarTag number={cow.tagNumber} tone={earTagTone(cow.status)} />
                   <div style={{ flex: 1, marginLeft: 12 }}>
                     <div className="ff-display" style={{ fontWeight: 700, fontSize: 14.5, color: C.ink }}>{cow.name}</div>
-                    <div style={{ fontSize: 11.5, color: C.sub, marginTop: 1 }}>{cow.breed}{cow.dob ? ` · ${fmtDateShort(cow.dob)}` : ''}</div>
-                    <div style={{ marginTop: 6, display: 'flex', gap: 6 }}>
+                    <div style={{ fontSize: 11.5, color: C.sub, marginTop: 1 }}>
+                      {cow.breed}{cow.dob ? ` · ${fmtDateShort(cow.dob)}` : ''}
+                      {cow.status === 'calf' && cow.motherCowId && nameById[cow.motherCowId] ? ` · Mother: ${nameById[cow.motherCowId]}` : ''}
+                    </div>
+                    <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                       <StatusPill status={cow.status} />
                       {(hs.status === 'due' || hs.status === 'overdue') && (
                         <Chip bg={hs.status === 'overdue' ? C.rustSoft : C.amberSoft} fg={hs.status === 'overdue' ? C.rust : C.amber}>Heat {hs.status === 'overdue' ? 'overdue' : 'due'}</Chip>
@@ -1253,13 +1268,12 @@ function CowsScreen({ cows, heatStatusFor, onOpenCow, onAdd, onExport }) {
           </div>
         )}
       </div>
-      <FAB onClick={onAdd} label="Add cow" />
     </div>
   );
 }
 
 // ---------- Cow detail ----------
-function CowDetail({ cow, milk, heat, medical, calves, heatStatus, insemStatus, onBack, onEdit, onDelete, onAddMilk, onAddHeat, onAddMedical, onAddCalf, onEditHeat, onDeleteHeat, onExport }) {
+function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus, onBack, onEdit, onDelete, onAddMilk, onAddHeat, onAddMedical, onAddCalf, onOpenCow, onEditHeat, onDeleteHeat, onExport }) {
   const [sub, setSub] = useState('milk');
   const [confirmDel, setConfirmDel] = useState(false);
   const [viewingMed, setViewingMed] = useState(null);
@@ -1268,7 +1282,8 @@ function CowDetail({ cow, milk, heat, medical, calves, heatStatus, insemStatus, 
   const cowMilk = milk.filter((m) => m.cowId === cow.id).sort((a, b) => b.date.localeCompare(a.date));
   const cowHeat = heat.filter((h) => h.cowId === cow.id).sort((a, b) => b.date.localeCompare(a.date));
   const cowMed = medical.filter((m) => m.cowId === cow.id).sort((a, b) => b.date.localeCompare(a.date));
-  const cowCalves = calves.filter((c) => c.cowId === cow.id).sort((a, b) => b.date.localeCompare(a.date));
+  const offspring = allCows.filter((c) => c.motherCowId === cow.id).sort((a, b) => (b.dob || '').localeCompare(a.dob || ''));
+  const mother = cow.motherCowId ? allCows.find((c) => c.id === cow.motherCowId) : null;
 
   return (
     <div style={{ paddingBottom: 24 }}>
@@ -1285,21 +1300,31 @@ function CowDetail({ cow, milk, heat, medical, calves, heatStatus, insemStatus, 
       />
       <div style={{ padding: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, background: '#fff', border: `1px solid ${C.line}`, borderRadius: 14, padding: 14, marginBottom: 16 }}>
-          <EarTag number={cow.tagNumber} size="lg" tone={cow.status === 'active' ? 'green' : cow.status === 'dry' ? 'brown' : 'grey'} />
+          <EarTag number={cow.tagNumber} size="lg" tone={earTagTone(cow.status)} />
           <div style={{ flex: 1 }}>
             <StatusPill status={cow.status} />
             <div style={{ fontSize: 11.5, color: C.sub, marginTop: 6 }}>Born {fmtDate(cow.dob)}</div>
-            <div style={{ fontSize: 11.5, color: C.sub }}>Heat cycle: every {cow.cycleLength || 21} days</div>
-            {cow.calvingDate && <div style={{ fontSize: 11.5, color: C.sub }}>Last calving: {fmtDate(cow.calvingDate)}</div>}
-            {cow.firstHeatDate && <div style={{ fontSize: 11.5, color: C.sub }}>First heat after calving: {fmtDate(cow.firstHeatDate)}</div>}
-            {cow.inseminatedOn && <div style={{ fontSize: 11.5, color: C.sub }}>Inseminated on: {fmtDate(cow.inseminatedOn)}</div>}
-            {cow.pregnancyConfirmed && cow.inseminatedOn && (
-              <div style={{ marginTop: 6 }}>
-                <Chip bg={C.greenSoft} fg={C.green}>Pregnant · Expected calving {fmtDate(addMonths(cow.inseminatedOn, 9))}</Chip>
-              </div>
+            {cow.status === 'calf' ? (
+              <>
+                {cow.gender && <div style={{ fontSize: 11.5, color: C.sub }}>Gender: {cow.gender}</div>}
+                {mother && <div style={{ fontSize: 11.5, color: C.sub }}>Mother: {mother.name} (#{mother.tagNumber})</div>}
+                {cow.birthWeight !== '' && cow.birthWeight != null && <div style={{ fontSize: 11.5, color: C.sub }}>Birth weight: {cow.birthWeight} kg</div>}
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 11.5, color: C.sub }}>Heat cycle: every {cow.cycleLength || 21} days</div>
+                {cow.calvingDate && <div style={{ fontSize: 11.5, color: C.sub }}>Last calving: {fmtDate(cow.calvingDate)}</div>}
+                {cow.firstHeatDate && <div style={{ fontSize: 11.5, color: C.sub }}>First heat after calving: {fmtDate(cow.firstHeatDate)}</div>}
+                {cow.inseminatedOn && <div style={{ fontSize: 11.5, color: C.sub }}>Inseminated on: {fmtDate(cow.inseminatedOn)}</div>}
+                {cow.pregnancyConfirmed && cow.inseminatedOn && (
+                  <div style={{ marginTop: 6 }}>
+                    <Chip bg={C.greenSoft} fg={C.green}>Pregnant · Expected calving {fmtDate(addMonths(cow.inseminatedOn, 9))}</Chip>
+                  </div>
+                )}
+              </>
             )}
             {cow.mastitisAntibiotic && <div style={{ marginTop: 6 }}><Chip bg={C.amberSoft} fg={C.amber}>Mastitis: {cow.mastitisAntibiotic}</Chip></div>}
-            {cowCalves.length > 0 && <div style={{ fontSize: 11.5, color: C.sub, marginTop: 4 }}>Calvings on record: {cowCalves.length}</div>}
+            {offspring.length > 0 && <div style={{ fontSize: 11.5, color: C.sub, marginTop: 4 }}>Offspring on record: {offspring.length}</div>}
           </div>
         </div>
 
@@ -1405,21 +1430,24 @@ function CowDetail({ cow, milk, heat, medical, calves, heatStatus, insemStatus, 
 
         {sub === 'calves' && (
           <ListBlock
-            items={cowCalves}
-            empty="No calving records yet."
-            addLabel="Add calf record"
+            items={offspring}
+            empty="No offspring on record yet."
+            addLabel="Add calf"
             onAdd={onAddCalf}
             render={(c) => (
-              <div key={c.id} style={rowCardStyle}>
-                <div style={{ color: C.brown }}><Baby size={16} /></div>
+              <div key={c.id} onClick={() => onOpenCow(c.id)} style={rowCardStyle}>
+                <EarTag number={c.tagNumber} size="sm" tone={earTagTone(c.status)} />
                 <div style={{ flex: 1, marginLeft: 10 }}>
-                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{c.calfName || `Calf #${c.calfTagNumber || '—'}`}</div>
+                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{c.name}</div>
                   <div style={{ fontSize: 11.5, color: C.sub }}>
-                    {fmtDate(c.date)}{c.calfTagNumber ? ` · Tag #${c.calfTagNumber}` : ''}{c.birthWeight ? ` · ${c.birthWeight} kg` : ''}
+                    {fmtDate(c.dob)}{c.birthWeight !== '' && c.birthWeight != null ? ` · ${c.birthWeight} kg at birth` : ''}
                   </div>
-                  {c.notes && <div style={{ fontSize: 11.5, color: C.sub, marginTop: 2 }}>{c.notes}</div>}
                 </div>
-                {c.gender && <Chip bg={c.gender === 'Female' ? C.greenSoft : C.milkSoft} fg={c.gender === 'Female' ? C.green : C.milk}>{c.gender}</Chip>}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {c.gender && <Chip bg={c.gender === 'Female' ? C.greenSoft : C.milkSoft} fg={c.gender === 'Female' ? C.green : C.milk}>{c.gender}</Chip>}
+                  <StatusPill status={c.status} />
+                  <ChevronRight size={15} color={C.grey} />
+                </div>
               </div>
             )}
           />
@@ -1786,13 +1814,16 @@ function ClearableDate({ value, onChange, max }) {
   );
 }
 
-function CowForm({ initial, onClose, onSave }) {
+function CowForm({ initial, defaultStatus, defaultMotherId, cows, onClose, onSave }) {
   const [name, setName] = useState(initial?.name || '');
   const [tagNumber, setTagNumber] = useState(initial?.tagNumber || '');
   const [breed, setBreed] = useState(initial?.breed || BREEDS[0]);
+  const [gender, setGender] = useState(initial?.gender || 'Female');
   const [dob, setDob] = useState(initial?.dob || '');
-  const [status, setStatus] = useState(initial?.status || 'active');
+  const [status, setStatus] = useState(initial?.status || defaultStatus || 'active');
   const [cycleLength, setCycleLength] = useState(initial?.cycleLength || 21);
+  const [motherCowId, setMotherCowId] = useState(initial?.motherCowId || defaultMotherId || '');
+  const [birthWeight, setBirthWeight] = useState(initial?.birthWeight ?? '');
   const [calvingDate, setCalvingDate] = useState(initial?.calvingDate || '');
   const [firstHeatDate, setFirstHeatDate] = useState(initial?.firstHeatDate || '');
   const [inseminatedOn, setInseminatedOn] = useState(initial?.inseminatedOn || '');
@@ -1800,52 +1831,84 @@ function CowForm({ initial, onClose, onSave }) {
   const [mastitisAntibiotic, setMastitisAntibiotic] = useState(initial?.mastitisAntibiotic || '');
   const valid = name.trim() && tagNumber.trim();
   const expectedCalving = pregnancyConfirmed && inseminatedOn ? addMonths(inseminatedOn, 9) : '';
+  const isCalf = status === 'calf';
+  const motherOptions = (cows || []).filter((c) => !initial || c.id !== initial.id);
 
   return (
-    <Modal title={initial ? 'Edit Cow' : 'Add Cow'} onClose={onClose}>
+    <Modal title={initial ? 'Edit Animal' : isCalf ? 'Add Calf' : 'Add Cow'} onClose={onClose}>
       <Field label="Name"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Ganga" style={inputStyle} /></Field>
       <Field label="Ear tag number"><input value={tagNumber} onChange={(e) => setTagNumber(e.target.value)} placeholder="e.g. 014" style={inputStyle} /></Field>
       <Field label="Breed"><Segmented options={BREEDS} value={breed} onChange={setBreed} /></Field>
+      <Field label="Status"><Segmented options={['active', 'dry', 'calf', 'sold']} value={status} onChange={setStatus} /></Field>
+
+      {isCalf && (
+        <>
+          <Field label="Gender"><Segmented options={['Female', 'Male']} value={gender} onChange={setGender} /></Field>
+          <Field label="Mother (optional)">
+            <select value={motherCowId} onChange={(e) => setMotherCowId(e.target.value)} style={inputStyle}>
+              <option value="">Not recorded</option>
+              {motherOptions.map((c) => <option key={c.id} value={c.id}>{c.name} (#{c.tagNumber})</option>)}
+            </select>
+          </Field>
+          <Field label="Birth weight in kg (optional)">
+            <input type="number" min={0} step="0.1" value={birthWeight} onChange={(e) => setBirthWeight(e.target.value)} placeholder="e.g. 28" style={inputStyle} />
+          </Field>
+        </>
+      )}
+
       <Field label="Date of birth"><ClearableDate value={dob} onChange={setDob} max={todayStr()} /></Field>
-      <Field label="Status"><Segmented options={['active', 'dry', 'sold']} value={status} onChange={setStatus} /></Field>
-      <Field label="Average heat cycle length (days)">
-        <input type="number" min={15} max={30} value={cycleLength} onChange={(e) => setCycleLength(Number(e.target.value))} style={inputStyle} />
-      </Field>
-      <Field label="Date of last calving (optional)">
-        <ClearableDate value={calvingDate} onChange={setCalvingDate} max={todayStr()} />
-      </Field>
-      <Field label="Date of first heat after calving (optional)">
-        <ClearableDate value={firstHeatDate} onChange={setFirstHeatDate} max={todayStr()} />
-      </Field>
-      <Field label="Inseminated on (optional)">
-        <ClearableDate value={inseminatedOn} onChange={setInseminatedOn} max={todayStr()} />
-        <div className="ff-body" style={{ fontSize: 11, color: C.sub, marginTop: 5 }}>You'll get a reminder 20 days after this date to check for repeat heat / pregnancy.</div>
-      </Field>
-      <Field label="Pregnancy confirmed?">
-        <button
-          type="button"
-          onClick={() => setPregnancyConfirmed(!pregnancyConfirmed)}
-          disabled={!inseminatedOn}
-          style={{ display: 'flex', alignItems: 'center', gap: 8, border: `1.5px solid ${pregnancyConfirmed ? C.green : C.line}`, background: pregnancyConfirmed ? C.greenSoft : '#fff', borderRadius: 10, padding: '9px 12px', opacity: inseminatedOn ? 1 : 0.5, width: '100%' }}
-        >
-          <div style={{ width: 18, height: 18, borderRadius: 5, border: `1.5px solid ${pregnancyConfirmed ? C.green : C.grey}`, background: pregnancyConfirmed ? C.green : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            {pregnancyConfirmed && <Check size={12} color="#fff" />}
-          </div>
-          <span className="ff-body" style={{ fontSize: 13, color: C.ink, fontWeight: 600 }}>
-            {inseminatedOn ? 'Yes, pregnancy confirmed' : 'Add an insemination date first'}
-          </span>
-        </button>
-        {expectedCalving && (
-          <div className="ff-body" style={{ fontSize: 12, color: C.green, marginTop: 8, background: C.greenSoft, borderRadius: 9, padding: '8px 10px' }}>
-            Expected calving: <strong>{fmtDate(expectedCalving)}</strong> (9 months from insemination)
-          </div>
-        )}
-      </Field>
+
+      {!isCalf && (
+        <>
+          <Field label="Average heat cycle length (days)">
+            <input type="number" min={15} max={30} value={cycleLength} onChange={(e) => setCycleLength(Number(e.target.value))} style={inputStyle} />
+          </Field>
+          <Field label="Date of last calving (optional)">
+            <ClearableDate value={calvingDate} onChange={setCalvingDate} max={todayStr()} />
+          </Field>
+          <Field label="Date of first heat after calving (optional)">
+            <ClearableDate value={firstHeatDate} onChange={setFirstHeatDate} max={todayStr()} />
+          </Field>
+          <Field label="Inseminated on (optional)">
+            <ClearableDate value={inseminatedOn} onChange={setInseminatedOn} max={todayStr()} />
+            <div className="ff-body" style={{ fontSize: 11, color: C.sub, marginTop: 5 }}>You'll get a reminder 20 days after this date to check for repeat heat / pregnancy.</div>
+          </Field>
+          <Field label="Pregnancy confirmed?">
+            <button
+              type="button"
+              onClick={() => setPregnancyConfirmed(!pregnancyConfirmed)}
+              disabled={!inseminatedOn}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, border: `1.5px solid ${pregnancyConfirmed ? C.green : C.line}`, background: pregnancyConfirmed ? C.greenSoft : '#fff', borderRadius: 10, padding: '9px 12px', opacity: inseminatedOn ? 1 : 0.5, width: '100%' }}
+            >
+              <div style={{ width: 18, height: 18, borderRadius: 5, border: `1.5px solid ${pregnancyConfirmed ? C.green : C.grey}`, background: pregnancyConfirmed ? C.green : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                {pregnancyConfirmed && <Check size={12} color="#fff" />}
+              </div>
+              <span className="ff-body" style={{ fontSize: 13, color: C.ink, fontWeight: 600 }}>
+                {inseminatedOn ? 'Yes, pregnancy confirmed' : 'Add an insemination date first'}
+              </span>
+            </button>
+            {expectedCalving && (
+              <div className="ff-body" style={{ fontSize: 12, color: C.green, marginTop: 8, background: C.greenSoft, borderRadius: 9, padding: '8px 10px' }}>
+                Expected calving: <strong>{fmtDate(expectedCalving)}</strong> (9 months from insemination)
+              </div>
+            )}
+          </Field>
+        </>
+      )}
+
       <Field label="Antibiotic used for mastitis (optional)">
         <input value={mastitisAntibiotic} onChange={(e) => setMastitisAntibiotic(e.target.value)} placeholder="e.g. Amoxicillin" style={inputStyle} />
       </Field>
-      <PrimaryButton disabled={!valid} onClick={() => onSave({ name: name.trim(), tagNumber: tagNumber.trim(), breed, dob, status, cycleLength, calvingDate, firstHeatDate, inseminatedOn, pregnancyConfirmed: !!(pregnancyConfirmed && inseminatedOn), mastitisAntibiotic: mastitisAntibiotic.trim() })}>
-        {initial ? 'Save changes' : 'Add cow'}
+      <PrimaryButton
+        disabled={!valid}
+        onClick={() => onSave({
+          name: name.trim(), tagNumber: tagNumber.trim(), breed, gender: isCalf ? gender : '', dob, status, cycleLength,
+          motherCowId: isCalf ? motherCowId : '', birthWeight: isCalf && birthWeight !== '' ? Number(birthWeight) : '',
+          calvingDate, firstHeatDate, inseminatedOn, pregnancyConfirmed: !!(pregnancyConfirmed && inseminatedOn),
+          mastitisAntibiotic: mastitisAntibiotic.trim(),
+        })}
+      >
+        {initial ? 'Save changes' : isCalf ? 'Add calf' : 'Add cow'}
       </PrimaryButton>
     </Modal>
   );
@@ -2040,29 +2103,6 @@ function MedicalForm({ cows, defaultCowId, onClose, onSave }) {
       <Field label="Next follow-up date (optional)"><input type="date" value={nextDueDate} onChange={(e) => setNextDueDate(e.target.value)} style={inputStyle} /></Field>
       <PrimaryButton disabled={!valid} onClick={() => onSave({ cowIds, date, type, medicine: medicine.trim(), description: description.trim(), vet: vet.trim(), nextDueDate })}>
         Save record{cowIds.length > 1 ? ` for ${cowIds.length} cows` : ''}
-      </PrimaryButton>
-    </Modal>
-  );
-}
-
-function CalfForm({ onClose, onSave }) {
-  const [date, setDate] = useState(todayStr());
-  const [calfName, setCalfName] = useState('');
-  const [calfTagNumber, setCalfTagNumber] = useState('');
-  const [gender, setGender] = useState('Female');
-  const [birthWeight, setBirthWeight] = useState('');
-  const [notes, setNotes] = useState('');
-  const valid = date;
-  return (
-    <Modal title="Add Calf Record" onClose={onClose}>
-      <Field label="Date of calving"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} max={todayStr()} /></Field>
-      <Field label="Calf name (optional)"><input value={calfName} onChange={(e) => setCalfName(e.target.value)} placeholder="e.g. Lakshmi" style={inputStyle} /></Field>
-      <Field label="Calf ear tag number (optional)"><input value={calfTagNumber} onChange={(e) => setCalfTagNumber(e.target.value)} placeholder="e.g. 041" style={inputStyle} /></Field>
-      <Field label="Gender"><Segmented options={['Female', 'Male']} value={gender} onChange={setGender} /></Field>
-      <Field label="Birth weight in kg (optional)"><input type="number" min={0} step="0.1" value={birthWeight} onChange={(e) => setBirthWeight(e.target.value)} placeholder="e.g. 28" style={inputStyle} /></Field>
-      <Field label="Notes (optional)"><input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. easy delivery, healthy" style={inputStyle} /></Field>
-      <PrimaryButton disabled={!valid} onClick={() => onSave({ date, calfName: calfName.trim(), calfTagNumber: calfTagNumber.trim(), gender, birthWeight: birthWeight === '' ? '' : Number(birthWeight), notes: notes.trim() })}>
-        Save calf record
       </PrimaryButton>
     </Modal>
   );
