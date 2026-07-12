@@ -1,12 +1,15 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useContext } from 'react';
 import {
   Home, Milk, HeartPulse, Stethoscope, Plus, ArrowLeft, X,
-  Calendar, Search, Check, ChevronRight, Trash2, Pencil, Droplet, Syringe, Printer, Download, Wheat, Baby, PackageMinus, PackagePlus, Upload, LogOut, Mail, Lock
+  Calendar, Search, Check, ChevronRight, Trash2, Pencil, Droplet, Syringe, Printer, Download, Wheat, Baby, PackageMinus, PackagePlus, Upload, LogOut, Mail, Lock, Users, UserPlus, Eye
 } from 'lucide-react';
 import ReactDOM from 'react-dom';
 import { supabase, configMissing } from './supabaseClient.js';
 
 // ---------- Design tokens ----------
+// ---------- Access role (owner / master / viewer) ----------
+const RoleContext = React.createContext({ role: 'owner', isReadOnly: false });
+
 const C = {
   bg: '#EEF0E6',
   card: '#FFFFFF',
@@ -390,6 +393,8 @@ function ScreenHeader({ title, subtitle, onBack, right }) {
 }
 
 function FAB({ onClick, label }) {
+  const { isReadOnly } = useContext(RoleContext);
+  if (isReadOnly) return null;
   return (
     <button
       onClick={onClick}
@@ -490,6 +495,212 @@ function Segmented({ options, value, onChange }) {
 }
 
 // ================= MAIN APP =================
+function ManageAccessModal({ ownerId, onClose }) {
+  const [members, setMembers] = useState([]);
+  const [invites, setInvites] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [email, setEmail] = useState('');
+  const [role, setRole] = useState('viewer');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const load = async () => {
+    setLoading(true);
+    const [{ data: acc }, { data: inv }] = await Promise.all([
+      supabase.from('farm_access').select('*').eq('owner_id', ownerId),
+      supabase.from('farm_invites').select('*').eq('owner_id', ownerId),
+    ]);
+    setMembers(acc || []);
+    setInvites(inv || []);
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const sendInvite = async () => {
+    setError('');
+    if (!email.trim() || !email.includes('@')) { setError('Enter a valid email address.'); return; }
+    setBusy(true);
+    const { error: err } = await supabase.from('farm_invites').insert({ owner_id: ownerId, email: email.trim().toLowerCase(), role });
+    setBusy(false);
+    if (err) { setError('Could not send invite. Please try again.'); return; }
+    setEmail('');
+    load();
+  };
+
+  const cancelInvite = async (id) => {
+    await supabase.from('farm_invites').delete().eq('id', id);
+    load();
+  };
+
+  const revokeAccess = async (id) => {
+    await supabase.from('farm_access').delete().eq('id', id);
+    load();
+  };
+
+  return (
+    <Modal title="Manage Access" onClose={onClose}>
+      <div className="ff-body" style={{ fontSize: 12, color: C.sub, marginBottom: 16, lineHeight: 1.5 }}>
+        Invite people by email to see this farm. <strong>Master</strong> can add, edit, and delete just like you. <strong>Viewer</strong> can only look, not change anything.
+      </div>
+
+      <Field label="Invite by email">
+        <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="someone@example.com" style={inputStyle} />
+      </Field>
+      <Field label="Role">
+        <Segmented options={['viewer', 'master']} value={role} onChange={setRole} />
+      </Field>
+      {error && <div style={{ background: C.rustSoft, color: C.rust, borderRadius: 10, padding: 10, fontSize: 12.5, marginBottom: 12 }}>{error}</div>}
+      <PrimaryButton disabled={busy} onClick={sendInvite}>{busy ? 'Sending…' : 'Send invite'}</PrimaryButton>
+
+      {loading ? (
+        <div style={{ fontSize: 12.5, color: C.sub, marginTop: 20 }}>Loading…</div>
+      ) : (
+        <>
+          {invites.length > 0 && (
+            <>
+              <SectionTitle title="Pending invites" />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
+                {invites.map((inv) => (
+                  <div key={inv.id} style={rowCardStyle}>
+                    <Mail size={16} color={C.grey} />
+                    <div style={{ flex: 1, marginLeft: 10 }}>
+                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{inv.email}</div>
+                      <div style={{ fontSize: 11, color: C.sub }}>Waiting to accept · {inv.role === 'master' ? 'Master' : 'Viewer'}</div>
+                    </div>
+                    <button onClick={() => cancelInvite(inv.id)} style={{ background: C.greySoft, border: 'none', borderRadius: 8, padding: 6 }}><X size={14} color={C.ink} /></button>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          <SectionTitle title="People with access" />
+          {members.length === 0 ? (
+            <MutedNote text="No one else has access to this farm yet." />
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {members.map((m) => (
+                <div key={m.id} style={rowCardStyle}>
+                  {m.role === 'master' ? <UserPlus size={16} color={C.green} /> : <Eye size={16} color={C.grey} />}
+                  <div style={{ flex: 1, marginLeft: 10 }}>
+                    <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{m.email || 'Member'}</div>
+                    <div style={{ fontSize: 11, color: C.sub }}>{m.role === 'master' ? 'Master — can edit' : 'Viewer — read only'}</div>
+                  </div>
+                  <button onClick={() => revokeAccess(m.id)} style={{ background: C.rustSoft, border: 'none', borderRadius: 8, padding: 6 }}><Trash2 size={14} color={C.rust} /></button>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </Modal>
+  );
+}
+
+function ManageAccessModal({ ownerId, onClose }) {
+  const [invites, setInvites] = useState([]);
+  const [members, setMembers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [email, setEmail] = useState('');
+  const [role, setRole] = useState('viewer');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const load = async () => {
+    setLoading(true);
+    const [{ data: inv }, { data: mem }] = await Promise.all([
+      supabase.from('farm_invites').select('*').eq('owner_id', ownerId).order('created_at', { ascending: false }),
+      supabase.from('farm_access').select('*').eq('owner_id', ownerId).order('created_at', { ascending: false }),
+    ]);
+    setInvites(inv || []);
+    setMembers(mem || []);
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const sendInvite = async () => {
+    setError('');
+    if (!email.trim() || !email.includes('@')) { setError('Enter a valid email address.'); return; }
+    setBusy(true);
+    const { error: err } = await supabase.from('farm_invites').insert({ owner_id: ownerId, email: email.trim().toLowerCase(), role });
+    setBusy(false);
+    if (err) { setError('Could not send invite. Please try again.'); return; }
+    setEmail('');
+    load();
+  };
+
+  const cancelInvite = async (id) => {
+    await supabase.from('farm_invites').delete().eq('id', id);
+    load();
+  };
+
+  const revokeMember = async (id) => {
+    await supabase.from('farm_access').delete().eq('id', id);
+    load();
+  };
+
+  return (
+    <Modal title="Manage Access" onClose={onClose}>
+      <div className="ff-body" style={{ fontSize: 12.5, color: C.sub, marginBottom: 16, lineHeight: 1.5 }}>
+        Invite people by email to see this same farm. <strong>Master</strong> can add, edit, and delete just like you. <strong>Viewer</strong> can only look — nothing they do can change your data.
+      </div>
+
+      <Field label="Invite by email">
+        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="someone@example.com" style={inputStyle} />
+      </Field>
+      <Field label="Role">
+        <Segmented options={['viewer', 'master']} value={role} onChange={setRole} />
+      </Field>
+      {error && <div style={{ background: C.rustSoft, color: C.rust, borderRadius: 10, padding: 10, fontSize: 12.5, marginBottom: 12 }}>{error}</div>}
+      <PrimaryButton disabled={busy} onClick={sendInvite}>{busy ? 'Sending…' : 'Send invite'}</PrimaryButton>
+
+      <div style={{ marginTop: 22 }}>
+        <SectionTitle title="Pending invites" />
+        {loading ? (
+          <MutedNote text="Loading…" />
+        ) : invites.length === 0 ? (
+          <MutedNote text="No pending invites. Sent invites are accepted automatically the moment that person logs in with the same email." />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
+            {invites.map((inv) => (
+              <div key={inv.id} style={rowCardStyle}>
+                <Mail size={16} color={C.grey} />
+                <div style={{ flex: 1, marginLeft: 10 }}>
+                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{inv.email}</div>
+                  <div style={{ fontSize: 11, color: C.sub }}>Waiting to accept · {inv.role}</div>
+                </div>
+                <button onClick={() => cancelInvite(inv.id)} style={{ background: C.greySoft, border: 'none', borderRadius: 8, padding: 6 }}><X size={14} color={C.ink} /></button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <SectionTitle title="People with access" />
+        {loading ? (
+          <MutedNote text="Loading…" />
+        ) : members.length === 0 ? (
+          <MutedNote text="Nobody else has access to this farm yet." />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {members.map((m) => (
+              <div key={m.id} style={rowCardStyle}>
+                {m.role === 'master' ? <UserPlus size={16} color={C.green} /> : <Eye size={16} color={C.grey} />}
+                <div style={{ flex: 1, marginLeft: 10 }}>
+                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{m.email || 'Member'}</div>
+                  <div style={{ fontSize: 11, color: C.sub }}>{m.role === 'master' ? 'Master access' : 'View only'}</div>
+                </div>
+                <button onClick={() => revokeMember(m.id)} style={{ background: C.rustSoft, border: 'none', borderRadius: 8, padding: 6 }}><Trash2 size={14} color={C.rust} /></button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 function AuthScreen() {
   const [mode, setMode] = useState('login'); // 'login' | 'signup'
   const [email, setEmail] = useState('');
@@ -663,6 +874,8 @@ export default function App() {
   const [session, setSession] = useState(undefined); // undefined = checking, null = signed out, object = signed in
   const [authError, setAuthError] = useState('');
   const [authBusy, setAuthBusy] = useState(false);
+  const [role, setRole] = useState('owner'); // 'owner' | 'master' | 'viewer'
+  const [ownerId, setOwnerId] = useState(null); // whose data we're actually looking at
 
   useEffect(() => {
     if (configMissing) { setSession(null); return; }
@@ -670,6 +883,33 @@ export default function App() {
     const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
     return () => sub.subscription.unsubscribe();
   }, []);
+
+  const resolveAccess = async (mySession) => {
+    const myId = mySession.user.id;
+    const myEmail = mySession.user.email;
+    try {
+      // 1) Accept any pending invite addressed to my email
+      const { data: invites } = await supabase.from('farm_invites').select('*');
+      if (invites && invites.length) {
+        for (const inv of invites) {
+          await supabase.from('farm_access').insert({ owner_id: inv.owner_id, viewer_id: myId, email: myEmail, role: inv.role });
+          await supabase.from('farm_invites').delete().eq('id', inv.id);
+        }
+      }
+      // 2) Am I someone else's shared user?
+      const { data: access } = await supabase.from('farm_access').select('*').eq('viewer_id', myId).limit(1);
+      if (access && access.length) {
+        setOwnerId(access[0].owner_id);
+        setRole(access[0].role === 'master' ? 'master' : 'viewer');
+        return;
+      }
+    } catch (e) {
+      console.error('Access resolution failed', e);
+    }
+    // 3) Otherwise I'm the owner of my own farm
+    setOwnerId(myId);
+    setRole('owner');
+  };
 
   const loadAllData = async () => {
     try {
@@ -689,13 +929,19 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (session) { setLoaded(false); loadAllData(); }
-    else if (session === null) { setCows([]); setMilk([]); setHeat([]); setMedical([]); setFeedTypes([]); setFeedTransactions([]); setLoaded(true); }
+    if (session) {
+      setLoaded(false);
+      resolveAccess(session).then(loadAllData);
+    } else if (session === null) {
+      setCows([]); setMilk([]); setHeat([]); setMedical([]); setFeedTypes([]); setFeedTransactions([]); setLoaded(true);
+    }
   }, [session]);
 
-  const userId = session?.user?.id;
+  const userId = ownerId;
+  const isReadOnly = role === 'viewer';
 
   const handleSignOut = async () => { await supabase.auth.signOut(); };
+
 
   const onEditHeat = (record) => setModal({ type: 'heat', cowId: record.cowId, editId: record.id });
   const onDeleteHeat = async (record) => {
@@ -774,6 +1020,7 @@ export default function App() {
   }
 
   return (
+    <RoleContext.Provider value={{ role, isReadOnly }}>
     <>
       {FONTS}
       <div className="app-shell" style={{ display: 'flex', justifyContent: 'center', background: C.bg }}>
@@ -830,6 +1077,7 @@ export default function App() {
                   cows={cows} milkToday={milkToday} heatAlerts={heatAlerts} medDue={medDue} insemAlerts={insemAlerts}
                   onOpenCow={setOpenCowId} onGoTab={setTab}
                   onBackup={handleBackupClick} onRestore={handleRestoreClick} onSignOut={handleSignOut}
+                  onManageAccess={() => setModal({ type: 'manageAccess' })}
                   userEmail={session?.user?.email}
                 />
               )}
@@ -1021,6 +1269,10 @@ export default function App() {
             />
           )}
 
+          {modal && modal.type === 'manageAccess' && (
+            <ManageAccessModal ownerId={session.user.id} onClose={() => setModal(null)} />
+          )}
+
           <input ref={fileInputRef} type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={handleFileSelected} />
 
           {restorePending && (
@@ -1045,6 +1297,7 @@ export default function App() {
         <PrintDocument job={printJob} />
       </div>
     </>
+    </RoleContext.Provider>
   );
 }
 
@@ -1079,7 +1332,8 @@ function BottomNav({ tab, setTab }) {
 }
 
 // ---------- Home ----------
-function HomeScreen({ cows, milkToday, heatAlerts, medDue, insemAlerts, onOpenCow, onGoTab, onBackup, onRestore, onSignOut, userEmail }) {
+function HomeScreen({ cows, milkToday, heatAlerts, medDue, insemAlerts, onOpenCow, onGoTab, onBackup, onRestore, onSignOut, onManageAccess, userEmail }) {
+  const { role, isReadOnly } = useContext(RoleContext);
   return (
     <div>
       <ScreenHeader
@@ -1087,13 +1341,28 @@ function HomeScreen({ cows, milkToday, heatAlerts, medDue, insemAlerts, onOpenCo
         right={
           <div style={{ display: 'flex', gap: 6 }}>
             <HeaderIconButton title="Backup all data" icon={<Download size={15} color="#fff" />} onClick={onBackup} />
-            <HeaderIconButton title="Restore from backup" icon={<Upload size={15} color="#fff" />} onClick={onRestore} />
+            {!isReadOnly && <HeaderIconButton title="Restore from backup" icon={<Upload size={15} color="#fff" />} onClick={onRestore} />}
+            {role === 'owner' && <HeaderIconButton title="Manage access" icon={<Users size={15} color="#fff" />} onClick={onManageAccess} />}
             <HeaderIconButton title="Sign out" icon={<LogOut size={15} color="#fff" />} onClick={onSignOut} />
           </div>
         }
       />
       <div style={{ padding: 16 }}>
-        {userEmail && <div style={{ fontSize: 11, color: C.sub, marginBottom: 10 }}>Signed in as {userEmail}</div>}
+        {userEmail && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <div style={{ fontSize: 11, color: C.sub }}>Signed in as {userEmail}</div>
+            {role !== 'owner' && (
+              <Chip bg={role === 'master' ? C.greenSoft : C.greySoft} fg={role === 'master' ? C.green : C.grey}>
+                {role === 'master' ? 'Master access' : 'View only'}
+              </Chip>
+            )}
+          </div>
+        )}
+        {isReadOnly && (
+          <div style={{ background: C.greySoft, borderRadius: 12, padding: '10px 12px', marginBottom: 12, fontSize: 11.5, color: C.grey, lineHeight: 1.5, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Eye size={14} /> You have view-only access to this farm — adding, editing, and deleting is turned off for your account.
+          </div>
+        )}
         <div style={{ background: C.milkSoft, borderRadius: 12, padding: '10px 12px', marginBottom: 16, fontSize: 11.5, color: C.milk, lineHeight: 1.5 }}>
           Tip: your data syncs automatically to any device you log into with this account. Use the download/upload icons above for an extra offline backup.
         </div>
@@ -1190,12 +1459,17 @@ const rowCardStyle = { background: '#fff', borderRadius: 12, padding: 10, displa
 
 // ---------- Cows list ----------
 function CowsScreen({ cows, heatStatusFor, onOpenCow, onAddCow, onAddCalf, onExport }) {
+  const { isReadOnly } = useContext(RoleContext);
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const nameById = Object.fromEntries(cows.map((c) => [c.id, c.name]));
   const filtered = cows
     .filter((c) => (c.name + c.tagNumber + c.breed).toLowerCase().includes(q.toLowerCase()))
-    .filter((c) => statusFilter === 'All' || c.status === statusFilter.toLowerCase());
+    .filter((c) => {
+      if (statusFilter === 'All') return true;
+      if (statusFilter === 'Pregnant') return !!c.pregnancyConfirmed;
+      return c.status === statusFilter.toLowerCase();
+    });
   return (
     <div>
       <ScreenHeader
@@ -1208,6 +1482,7 @@ function CowsScreen({ cows, heatStatusFor, onOpenCow, onAddCow, onAddCalf, onExp
         }
       />
       <div style={{ padding: 16 }}>
+        {!isReadOnly && (
         <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
           <button
             onClick={onAddCow}
@@ -1224,13 +1499,14 @@ function CowsScreen({ cows, heatStatusFor, onOpenCow, onAddCow, onAddCalf, onExp
             <Baby size={15} /> Add calf
           </button>
         </div>
+        )}
         <div style={{ position: 'relative', marginBottom: 12 }}>
           <Search size={15} color={C.grey} style={{ position: 'absolute', left: 12, top: 11 }} />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name, tag, breed" style={{ ...inputStyle, paddingLeft: 34 }} />
         </div>
         <div style={{ marginBottom: 14 }}>
           <Segmented
-            options={['All', 'Active', 'Dry', 'Calf', 'Sold']}
+            options={['All', 'Active', 'Dry', 'Calf', 'Pregnant']}
             value={statusFilter}
             onChange={setStatusFilter}
           />
@@ -1274,6 +1550,7 @@ function CowsScreen({ cows, heatStatusFor, onOpenCow, onAddCow, onAddCalf, onExp
 
 // ---------- Cow detail ----------
 function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus, onBack, onEdit, onDelete, onAddMilk, onAddHeat, onAddMedical, onAddCalf, onOpenCow, onEditHeat, onDeleteHeat, onExport }) {
+  const { isReadOnly } = useContext(RoleContext);
   const [sub, setSub] = useState('milk');
   const [confirmDel, setConfirmDel] = useState(false);
   const [viewingMed, setViewingMed] = useState(null);
@@ -1292,10 +1569,12 @@ function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus,
         subtitle={`Tag #${cow.tagNumber} · ${cow.breed}`}
         onBack={onBack}
         right={
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button onClick={onEdit} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: 10, padding: 8, minWidth: 34, minHeight: 34, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Pencil size={15} color="#fff" /></button>
-            <button onClick={() => setConfirmDel(true)} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: 10, padding: 8, minWidth: 34, minHeight: 34, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Trash2 size={15} color="#fff" /></button>
-          </div>
+          !isReadOnly && (
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button onClick={onEdit} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: 10, padding: 8, minWidth: 34, minHeight: 34, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Pencil size={15} color="#fff" /></button>
+              <button onClick={() => setConfirmDel(true)} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: 10, padding: 8, minWidth: 34, minHeight: 34, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Trash2 size={15} color="#fff" /></button>
+            </div>
+          )
         }
       />
       <div style={{ padding: 16 }}>
@@ -1475,11 +1754,14 @@ function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus,
 }
 
 function ListBlock({ items, empty, addLabel, onAdd, render }) {
+  const { isReadOnly } = useContext(RoleContext);
   return (
     <div>
-      <button onClick={onAdd} className="ff-body" style={{ width: '100%', border: `1.5px dashed ${C.green}55`, background: C.greenSoft, color: C.green, borderRadius: 12, padding: '10px 0', fontWeight: 700, fontSize: 13, marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-        <Plus size={15} /> {addLabel}
-      </button>
+      {!isReadOnly && (
+        <button onClick={onAdd} className="ff-body" style={{ width: '100%', border: `1.5px dashed ${C.green}55`, background: C.greenSoft, color: C.green, borderRadius: 12, padding: '10px 0', fontWeight: 700, fontSize: 13, marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+          <Plus size={15} /> {addLabel}
+        </button>
+      )}
       {items.length === 0 ? (
         <MutedNote text={empty} />
       ) : (
@@ -1501,6 +1783,22 @@ function MilkScreen({ cows, milk, cowById, onAdd, onExport }) {
   const pmTotal = pmEntries.reduce((s, m) => s + Number(m.liters || 0), 0);
   const total = entries.reduce((s, m) => s + Number(m.liters || 0), 0);
 
+  // For the combined "Both" view: one row per cow, with AM + PM + total together
+  const combinedByCow = useMemo(() => {
+    const map = {};
+    dayEntries.forEach((m) => {
+      if (!map[m.cowId]) map[m.cowId] = { cowId: m.cowId, am: null, pm: null };
+      if (m.session === 'AM') map[m.cowId].am = Number(m.liters);
+      else map[m.cowId].pm = Number(m.liters);
+    });
+    return Object.values(map)
+      .map((r) => ({ ...r, total: (r.am || 0) + (r.pm || 0) }))
+      .sort((a, b) => {
+        const cowA = cowById(a.cowId), cowB = cowById(b.cowId);
+        return (cowA?.name || '').localeCompare(cowB?.name || '');
+      });
+  }, [dayEntries]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const renderEntry = (m) => {
     const cow = cowById(m.cowId);
     return (
@@ -1511,6 +1809,25 @@ function MilkScreen({ cows, milk, cowById, onAdd, onExport }) {
           <div style={{ fontSize: 11.5, color: C.sub }}>{m.session} session</div>
         </div>
         <div className="ff-display" style={{ fontWeight: 700, fontSize: 15, color: C.milk }}>{m.liters} L</div>
+      </div>
+    );
+  };
+
+  const renderCombined = (r) => {
+    const cow = cowById(r.cowId);
+    return (
+      <div key={r.cowId} style={{ ...rowCardStyle, alignItems: 'flex-start' }}>
+        {cow && <EarTag number={cow.tagNumber} size="sm" />}
+        <div style={{ flex: 1, marginLeft: 10 }}>
+          <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{cow ? cow.name : 'Unknown'}</div>
+          <div style={{ fontSize: 11.5, color: C.sub, marginTop: 1 }}>
+            AM {r.am != null ? `${r.am} L` : '—'} &nbsp;·&nbsp; PM {r.pm != null ? `${r.pm} L` : '—'}
+          </div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div className="ff-display" style={{ fontWeight: 700, fontSize: 16, color: C.milk }}>{r.total.toFixed(1)} L</div>
+          <div style={{ fontSize: 10, color: C.sub }}>total</div>
+        </div>
       </div>
     );
   };
@@ -1565,17 +1882,11 @@ function MilkScreen({ cows, milk, cowById, onAdd, onExport }) {
           <EmptyState icon={<Milk size={30} />} title="Add a cow first" subtitle="You'll need at least one cow profile before logging milk." />
         ) : sessionFilter === 'Both' ? (
           <>
-            <SectionTitle title={`AM session (${amTotal.toFixed(1)} L)`} />
-            {amEntries.length === 0 ? (
-              <MutedNote text="No AM milk logged for this date yet." />
+            <SectionTitle title="Entries" />
+            {combinedByCow.length === 0 ? (
+              <MutedNote text="No milk logged for this date yet." />
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>{amEntries.map(renderEntry)}</div>
-            )}
-            <SectionTitle title={`PM session (${pmTotal.toFixed(1)} L)`} />
-            {pmEntries.length === 0 ? (
-              <MutedNote text="No PM milk logged for this date yet." />
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{pmEntries.map(renderEntry)}</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{combinedByCow.map(renderCombined)}</div>
             )}
           </>
         ) : (
@@ -1672,6 +1983,7 @@ function HeatScreen({ cows, heat, heatStatusFor, cowById, onAdd, onOpenCow, onEd
 
 // ---------- Health screen ----------
 function HeatDetailModal({ record, cow, onClose, onEdit, onDelete }) {
+  const { isReadOnly } = useContext(RoleContext);
   const [confirmDel, setConfirmDel] = useState(false);
   if (!record) return null;
   if (confirmDel) {
@@ -1698,14 +2010,16 @@ function HeatDetailModal({ record, cow, onClose, onEdit, onDelete }) {
         <DetailRow label="Bred / inseminated" value={record.bred ? 'Yes' : 'No'} />
         {record.notes && <DetailRow label="Notes" value={record.notes} />}
       </div>
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button onClick={() => onEdit(record)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.greenSoft, color: C.green, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 13, fontWeight: 700 }}>
-          <Pencil size={14} /> Edit
-        </button>
-        <button onClick={() => setConfirmDel(true)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.rustSoft, color: C.rust, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 13, fontWeight: 700 }}>
-          <Trash2 size={14} /> Delete
-        </button>
-      </div>
+      {!isReadOnly && (
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => onEdit(record)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.greenSoft, color: C.green, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 13, fontWeight: 700 }}>
+            <Pencil size={14} /> Edit
+          </button>
+          <button onClick={() => setConfirmDel(true)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.rustSoft, color: C.rust, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 13, fontWeight: 700 }}>
+            <Trash2 size={14} /> Delete
+          </button>
+        </div>
+      )}
     </Modal>
   );
 }
@@ -2110,6 +2424,7 @@ function MedicalForm({ cows, defaultCowId, onClose, onSave }) {
 
 // ================= FEED MANAGEMENT =================
 function FeedScreen({ feedTypes, feedTransactions, onAddType, onEditType, onDeleteType, onLogTxn, onExport }) {
+  const { isReadOnly } = useContext(RoleContext);
   const month = currentMonthStr();
   const totalSpendThisMonth = feedTypes.reduce((s, f) => s + feedMonthSpend(f.id, feedTransactions, month), 0);
   const totalPurchased = feedTypes.reduce((s, f) => s + feedTotalPurchased(f.id, feedTransactions), 0);
@@ -2171,8 +2486,12 @@ function FeedScreen({ feedTypes, feedTransactions, onAddType, onEditType, onDele
                       <div style={{ fontSize: 11.5, color: C.sub, marginTop: 1 }}>₹{f.costPerBag} / bag</div>
                     </div>
                     <div style={{ display: 'flex', gap: 6 }}>
-                      <button onClick={() => onEditType(f.id)} style={{ background: C.greySoft, border: 'none', borderRadius: 8, padding: 5 }}><Pencil size={13} color={C.ink} /></button>
-                      <button onClick={() => onDeleteType(f.id)} style={{ background: C.greySoft, border: 'none', borderRadius: 8, padding: 5 }}><Trash2 size={13} color={C.ink} /></button>
+                      {!isReadOnly && (
+                        <>
+                          <button onClick={() => onEditType(f.id)} style={{ background: C.greySoft, border: 'none', borderRadius: 8, padding: 5 }}><Pencil size={13} color={C.ink} /></button>
+                          <button onClick={() => onDeleteType(f.id)} style={{ background: C.greySoft, border: 'none', borderRadius: 8, padding: 5 }}><Trash2 size={13} color={C.ink} /></button>
+                        </>
+                      )}
                     </div>
                   </div>
 
@@ -2206,14 +2525,16 @@ function FeedScreen({ feedTypes, feedTransactions, onAddType, onEditType, onDele
                   </div>
 
                   {low && <div style={{ marginBottom: 10 }}><Chip bg={C.rustSoft} fg={C.rust}>Running low — consider restocking</Chip></div>}
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={() => onLogTxn(f.id, 'purchase')} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, background: C.greenSoft, color: C.green, border: 'none', borderRadius: 9, padding: '8px 0', fontSize: 12, fontWeight: 700 }}>
-                      <PackagePlus size={13} /> Log purchase
-                    </button>
-                    <button onClick={() => onLogTxn(f.id, 'usage')} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, background: C.greySoft, color: C.ink, border: 'none', borderRadius: 9, padding: '8px 0', fontSize: 12, fontWeight: 700 }}>
-                      <PackageMinus size={13} /> Log usage
-                    </button>
-                  </div>
+                  {!isReadOnly && (
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button onClick={() => onLogTxn(f.id, 'purchase')} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, background: C.greenSoft, color: C.green, border: 'none', borderRadius: 9, padding: '8px 0', fontSize: 12, fontWeight: 700 }}>
+                        <PackagePlus size={13} /> Log purchase
+                      </button>
+                      <button onClick={() => onLogTxn(f.id, 'usage')} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, background: C.greySoft, color: C.ink, border: 'none', borderRadius: 9, padding: '8px 0', fontSize: 12, fontWeight: 700 }}>
+                        <PackageMinus size={13} /> Log usage
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}
