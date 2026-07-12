@@ -495,211 +495,211 @@ function Segmented({ options, value, onChange }) {
 }
 
 // ================= MAIN APP =================
-function ManageAccessModal({ ownerId, onClose }) {
-  const [members, setMembers] = useState([]);
-  const [invites, setInvites] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [email, setEmail] = useState('');
-  const [role, setRole] = useState('viewer');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
+// function ManageAccessModal({ ownerId, onClose }) {
+//   const [members, setMembers] = useState([]);
+//   const [invites, setInvites] = useState([]);
+//   const [loading, setLoading] = useState(true);
+//   const [email, setEmail] = useState('');
+//   const [role, setRole] = useState('viewer');
+//   const [busy, setBusy] = useState(false);
+//   const [error, setError] = useState('');
 
-  const load = async () => {
-    setLoading(true);
-    const [{ data: acc }, { data: inv }] = await Promise.all([
-      supabase.from('farm_access').select('*').eq('owner_id', ownerId),
-      supabase.from('farm_invites').select('*').eq('owner_id', ownerId),
-    ]);
-    setMembers(acc || []);
-    setInvites(inv || []);
-    setLoading(false);
-  };
+//   const load = async () => {
+//     setLoading(true);
+//     const [{ data: acc }, { data: inv }] = await Promise.all([
+//       supabase.from('farm_access').select('*').eq('owner_id', ownerId),
+//       supabase.from('farm_invites').select('*').eq('owner_id', ownerId),
+//     ]);
+//     setMembers(acc || []);
+//     setInvites(inv || []);
+//     setLoading(false);
+//   };
 
-  useEffect(() => { load(); }, []);
+//   useEffect(() => { load(); }, []);
 
-  const sendInvite = async () => {
-    setError('');
-    if (!email.trim() || !email.includes('@')) { setError('Enter a valid email address.'); return; }
-    setBusy(true);
-    const { error: err } = await supabase.from('farm_invites').insert({ owner_id: ownerId, email: email.trim().toLowerCase(), role });
-    setBusy(false);
-    if (err) { setError('Could not send invite. Please try again.'); return; }
-    setEmail('');
-    load();
-  };
+//   const sendInvite = async () => {
+//     setError('');
+//     if (!email.trim() || !email.includes('@')) { setError('Enter a valid email address.'); return; }
+//     setBusy(true);
+//     const { error: err } = await supabase.from('farm_invites').insert({ owner_id: ownerId, email: email.trim().toLowerCase(), role });
+//     setBusy(false);
+//     if (err) { setError('Could not send invite. Please try again.'); return; }
+//     setEmail('');
+//     load();
+//   };
 
-  const cancelInvite = async (id) => {
-    await supabase.from('farm_invites').delete().eq('id', id);
-    load();
-  };
+//   const cancelInvite = async (id) => {
+//     await supabase.from('farm_invites').delete().eq('id', id);
+//     load();
+//   };
 
-  const revokeAccess = async (id) => {
-    await supabase.from('farm_access').delete().eq('id', id);
-    load();
-  };
+//   const revokeAccess = async (id) => {
+//     await supabase.from('farm_access').delete().eq('id', id);
+//     load();
+//   };
 
-  return (
-    <Modal title="Manage Access" onClose={onClose}>
-      <div className="ff-body" style={{ fontSize: 12, color: C.sub, marginBottom: 16, lineHeight: 1.5 }}>
-        Invite people by email to see this farm. <strong>Master</strong> can add, edit, and delete just like you. <strong>Viewer</strong> can only look, not change anything.
-      </div>
+//   return (
+//     <Modal title="Manage Access" onClose={onClose}>
+//       <div className="ff-body" style={{ fontSize: 12, color: C.sub, marginBottom: 16, lineHeight: 1.5 }}>
+//         Invite people by email to see this farm. <strong>Master</strong> can add, edit, and delete just like you. <strong>Viewer</strong> can only look, not change anything.
+//       </div>
 
-      <Field label="Invite by email">
-        <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="someone@example.com" style={inputStyle} />
-      </Field>
-      <Field label="Role">
-        <Segmented options={['viewer', 'master']} value={role} onChange={setRole} />
-      </Field>
-      {error && <div style={{ background: C.rustSoft, color: C.rust, borderRadius: 10, padding: 10, fontSize: 12.5, marginBottom: 12 }}>{error}</div>}
-      <PrimaryButton disabled={busy} onClick={sendInvite}>{busy ? 'Sending…' : 'Send invite'}</PrimaryButton>
+//       <Field label="Invite by email">
+//         <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="someone@example.com" style={inputStyle} />
+//       </Field>
+//       <Field label="Role">
+//         <Segmented options={['viewer', 'master']} value={role} onChange={setRole} />
+//       </Field>
+//       {error && <div style={{ background: C.rustSoft, color: C.rust, borderRadius: 10, padding: 10, fontSize: 12.5, marginBottom: 12 }}>{error}</div>}
+//       <PrimaryButton disabled={busy} onClick={sendInvite}>{busy ? 'Sending…' : 'Send invite'}</PrimaryButton>
 
-      {loading ? (
-        <div style={{ fontSize: 12.5, color: C.sub, marginTop: 20 }}>Loading…</div>
-      ) : (
-        <>
-          {invites.length > 0 && (
-            <>
-              <SectionTitle title="Pending invites" />
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
-                {invites.map((inv) => (
-                  <div key={inv.id} style={rowCardStyle}>
-                    <Mail size={16} color={C.grey} />
-                    <div style={{ flex: 1, marginLeft: 10 }}>
-                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{inv.email}</div>
-                      <div style={{ fontSize: 11, color: C.sub }}>Waiting to accept · {inv.role === 'master' ? 'Master' : 'Viewer'}</div>
-                    </div>
-                    <button onClick={() => cancelInvite(inv.id)} style={{ background: C.greySoft, border: 'none', borderRadius: 8, padding: 6 }}><X size={14} color={C.ink} /></button>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
+//       {loading ? (
+//         <div style={{ fontSize: 12.5, color: C.sub, marginTop: 20 }}>Loading…</div>
+//       ) : (
+//         <>
+//           {invites.length > 0 && (
+//             <>
+//               <SectionTitle title="Pending invites" />
+//               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
+//                 {invites.map((inv) => (
+//                   <div key={inv.id} style={rowCardStyle}>
+//                     <Mail size={16} color={C.grey} />
+//                     <div style={{ flex: 1, marginLeft: 10 }}>
+//                       <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{inv.email}</div>
+//                       <div style={{ fontSize: 11, color: C.sub }}>Waiting to accept · {inv.role === 'master' ? 'Master' : 'Viewer'}</div>
+//                     </div>
+//                     <button onClick={() => cancelInvite(inv.id)} style={{ background: C.greySoft, border: 'none', borderRadius: 8, padding: 6 }}><X size={14} color={C.ink} /></button>
+//                   </div>
+//                 ))}
+//               </div>
+//             </>
+//           )}
 
-          <SectionTitle title="People with access" />
-          {members.length === 0 ? (
-            <MutedNote text="No one else has access to this farm yet." />
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {members.map((m) => (
-                <div key={m.id} style={rowCardStyle}>
-                  {m.role === 'master' ? <UserPlus size={16} color={C.green} /> : <Eye size={16} color={C.grey} />}
-                  <div style={{ flex: 1, marginLeft: 10 }}>
-                    <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{m.email || 'Member'}</div>
-                    <div style={{ fontSize: 11, color: C.sub }}>{m.role === 'master' ? 'Master — can edit' : 'Viewer — read only'}</div>
-                  </div>
-                  <button onClick={() => revokeAccess(m.id)} style={{ background: C.rustSoft, border: 'none', borderRadius: 8, padding: 6 }}><Trash2 size={14} color={C.rust} /></button>
-                </div>
-              ))}
-            </div>
-          )}
-        </>
-      )}
-    </Modal>
-  );
-}
+//           <SectionTitle title="People with access" />
+//           {members.length === 0 ? (
+//             <MutedNote text="No one else has access to this farm yet." />
+//           ) : (
+//             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+//               {members.map((m) => (
+//                 <div key={m.id} style={rowCardStyle}>
+//                   {m.role === 'master' ? <UserPlus size={16} color={C.green} /> : <Eye size={16} color={C.grey} />}
+//                   <div style={{ flex: 1, marginLeft: 10 }}>
+//                     <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{m.email || 'Member'}</div>
+//                     <div style={{ fontSize: 11, color: C.sub }}>{m.role === 'master' ? 'Master — can edit' : 'Viewer — read only'}</div>
+//                   </div>
+//                   <button onClick={() => revokeAccess(m.id)} style={{ background: C.rustSoft, border: 'none', borderRadius: 8, padding: 6 }}><Trash2 size={14} color={C.rust} /></button>
+//                 </div>
+//               ))}
+//             </div>
+//           )}
+//         </>
+//       )}
+//     </Modal>
+//   );
+// }
 
-function ManageAccessModal({ ownerId, onClose }) {
-  const [invites, setInvites] = useState([]);
-  const [members, setMembers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [email, setEmail] = useState('');
-  const [role, setRole] = useState('viewer');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
+// function ManageAccessModal({ ownerId, onClose }) {
+//   const [invites, setInvites] = useState([]);
+//   const [members, setMembers] = useState([]);
+//   const [loading, setLoading] = useState(true);
+//   const [email, setEmail] = useState('');
+//   const [role, setRole] = useState('viewer');
+//   const [busy, setBusy] = useState(false);
+//   const [error, setError] = useState('');
 
-  const load = async () => {
-    setLoading(true);
-    const [{ data: inv }, { data: mem }] = await Promise.all([
-      supabase.from('farm_invites').select('*').eq('owner_id', ownerId).order('created_at', { ascending: false }),
-      supabase.from('farm_access').select('*').eq('owner_id', ownerId).order('created_at', { ascending: false }),
-    ]);
-    setInvites(inv || []);
-    setMembers(mem || []);
-    setLoading(false);
-  };
+//   const load = async () => {
+//     setLoading(true);
+//     const [{ data: inv }, { data: mem }] = await Promise.all([
+//       supabase.from('farm_invites').select('*').eq('owner_id', ownerId).order('created_at', { ascending: false }),
+//       supabase.from('farm_access').select('*').eq('owner_id', ownerId).order('created_at', { ascending: false }),
+//     ]);
+//     setInvites(inv || []);
+//     setMembers(mem || []);
+//     setLoading(false);
+//   };
 
-  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+//   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const sendInvite = async () => {
-    setError('');
-    if (!email.trim() || !email.includes('@')) { setError('Enter a valid email address.'); return; }
-    setBusy(true);
-    const { error: err } = await supabase.from('farm_invites').insert({ owner_id: ownerId, email: email.trim().toLowerCase(), role });
-    setBusy(false);
-    if (err) { setError('Could not send invite. Please try again.'); return; }
-    setEmail('');
-    load();
-  };
+//   const sendInvite = async () => {
+//     setError('');
+//     if (!email.trim() || !email.includes('@')) { setError('Enter a valid email address.'); return; }
+//     setBusy(true);
+//     const { error: err } = await supabase.from('farm_invites').insert({ owner_id: ownerId, email: email.trim().toLowerCase(), role });
+//     setBusy(false);
+//     if (err) { setError('Could not send invite. Please try again.'); return; }
+//     setEmail('');
+//     load();
+//   };
 
-  const cancelInvite = async (id) => {
-    await supabase.from('farm_invites').delete().eq('id', id);
-    load();
-  };
+//   const cancelInvite = async (id) => {
+//     await supabase.from('farm_invites').delete().eq('id', id);
+//     load();
+//   };
 
-  const revokeMember = async (id) => {
-    await supabase.from('farm_access').delete().eq('id', id);
-    load();
-  };
+//   const revokeMember = async (id) => {
+//     await supabase.from('farm_access').delete().eq('id', id);
+//     load();
+//   };
 
-  return (
-    <Modal title="Manage Access" onClose={onClose}>
-      <div className="ff-body" style={{ fontSize: 12.5, color: C.sub, marginBottom: 16, lineHeight: 1.5 }}>
-        Invite people by email to see this same farm. <strong>Master</strong> can add, edit, and delete just like you. <strong>Viewer</strong> can only look — nothing they do can change your data.
-      </div>
+//   return (
+//     <Modal title="Manage Access" onClose={onClose}>
+//       <div className="ff-body" style={{ fontSize: 12.5, color: C.sub, marginBottom: 16, lineHeight: 1.5 }}>
+//         Invite people by email to see this same farm. <strong>Master</strong> can add, edit, and delete just like you. <strong>Viewer</strong> can only look — nothing they do can change your data.
+//       </div>
 
-      <Field label="Invite by email">
-        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="someone@example.com" style={inputStyle} />
-      </Field>
-      <Field label="Role">
-        <Segmented options={['viewer', 'master']} value={role} onChange={setRole} />
-      </Field>
-      {error && <div style={{ background: C.rustSoft, color: C.rust, borderRadius: 10, padding: 10, fontSize: 12.5, marginBottom: 12 }}>{error}</div>}
-      <PrimaryButton disabled={busy} onClick={sendInvite}>{busy ? 'Sending…' : 'Send invite'}</PrimaryButton>
+//       <Field label="Invite by email">
+//         <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="someone@example.com" style={inputStyle} />
+//       </Field>
+//       <Field label="Role">
+//         <Segmented options={['viewer', 'master']} value={role} onChange={setRole} />
+//       </Field>
+//       {error && <div style={{ background: C.rustSoft, color: C.rust, borderRadius: 10, padding: 10, fontSize: 12.5, marginBottom: 12 }}>{error}</div>}
+//       <PrimaryButton disabled={busy} onClick={sendInvite}>{busy ? 'Sending…' : 'Send invite'}</PrimaryButton>
 
-      <div style={{ marginTop: 22 }}>
-        <SectionTitle title="Pending invites" />
-        {loading ? (
-          <MutedNote text="Loading…" />
-        ) : invites.length === 0 ? (
-          <MutedNote text="No pending invites. Sent invites are accepted automatically the moment that person logs in with the same email." />
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
-            {invites.map((inv) => (
-              <div key={inv.id} style={rowCardStyle}>
-                <Mail size={16} color={C.grey} />
-                <div style={{ flex: 1, marginLeft: 10 }}>
-                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{inv.email}</div>
-                  <div style={{ fontSize: 11, color: C.sub }}>Waiting to accept · {inv.role}</div>
-                </div>
-                <button onClick={() => cancelInvite(inv.id)} style={{ background: C.greySoft, border: 'none', borderRadius: 8, padding: 6 }}><X size={14} color={C.ink} /></button>
-              </div>
-            ))}
-          </div>
-        )}
+//       <div style={{ marginTop: 22 }}>
+//         <SectionTitle title="Pending invites" />
+//         {loading ? (
+//           <MutedNote text="Loading…" />
+//         ) : invites.length === 0 ? (
+//           <MutedNote text="No pending invites. Sent invites are accepted automatically the moment that person logs in with the same email." />
+//         ) : (
+//           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
+//             {invites.map((inv) => (
+//               <div key={inv.id} style={rowCardStyle}>
+//                 <Mail size={16} color={C.grey} />
+//                 <div style={{ flex: 1, marginLeft: 10 }}>
+//                   <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{inv.email}</div>
+//                   <div style={{ fontSize: 11, color: C.sub }}>Waiting to accept · {inv.role}</div>
+//                 </div>
+//                 <button onClick={() => cancelInvite(inv.id)} style={{ background: C.greySoft, border: 'none', borderRadius: 8, padding: 6 }}><X size={14} color={C.ink} /></button>
+//               </div>
+//             ))}
+//           </div>
+//         )}
 
-        <SectionTitle title="People with access" />
-        {loading ? (
-          <MutedNote text="Loading…" />
-        ) : members.length === 0 ? (
-          <MutedNote text="Nobody else has access to this farm yet." />
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {members.map((m) => (
-              <div key={m.id} style={rowCardStyle}>
-                {m.role === 'master' ? <UserPlus size={16} color={C.green} /> : <Eye size={16} color={C.grey} />}
-                <div style={{ flex: 1, marginLeft: 10 }}>
-                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{m.email || 'Member'}</div>
-                  <div style={{ fontSize: 11, color: C.sub }}>{m.role === 'master' ? 'Master access' : 'View only'}</div>
-                </div>
-                <button onClick={() => revokeMember(m.id)} style={{ background: C.rustSoft, border: 'none', borderRadius: 8, padding: 6 }}><Trash2 size={14} color={C.rust} /></button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </Modal>
-  );
-}
+//         <SectionTitle title="People with access" />
+//         {loading ? (
+//           <MutedNote text="Loading…" />
+//         ) : members.length === 0 ? (
+//           <MutedNote text="Nobody else has access to this farm yet." />
+//         ) : (
+//           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+//             {members.map((m) => (
+//               <div key={m.id} style={rowCardStyle}>
+//                 {m.role === 'master' ? <UserPlus size={16} color={C.green} /> : <Eye size={16} color={C.grey} />}
+//                 <div style={{ flex: 1, marginLeft: 10 }}>
+//                   <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{m.email || 'Member'}</div>
+//                   <div style={{ fontSize: 11, color: C.sub }}>{m.role === 'master' ? 'Master access' : 'View only'}</div>
+//                 </div>
+//                 <button onClick={() => revokeMember(m.id)} style={{ background: C.rustSoft, border: 'none', borderRadius: 8, padding: 6 }}><Trash2 size={14} color={C.rust} /></button>
+//               </div>
+//             ))}
+//           </div>
+//         )}
+//       </div>
+//     </Modal>
+//   );
+// }
 
 function AuthScreen() {
   const [mode, setMode] = useState('login'); // 'login' | 'signup'
@@ -1269,9 +1269,9 @@ export default function App() {
             />
           )}
 
-          {modal && modal.type === 'manageAccess' && (
+          {/* {modal && modal.type === 'manageAccess' && (
             <ManageAccessModal ownerId={session.user.id} onClose={() => setModal(null)} />
-          )}
+          )} */}
 
           <input ref={fileInputRef} type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={handleFileSelected} />
 
