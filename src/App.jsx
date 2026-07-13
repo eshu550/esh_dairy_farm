@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useContext } from 'react';
 import {
   Home, Milk, HeartPulse, Stethoscope, Plus, ArrowLeft, X,
-  Calendar, Search, Check, ChevronRight, Trash2, Pencil, Droplet, Syringe, Printer, Download, Wheat, Baby, PackageMinus, PackagePlus, Upload, LogOut, Mail, Lock, Users, UserPlus, Eye, Shield
+  Calendar, Search, Check, ChevronRight, Trash2, Pencil, Droplet, Syringe, Printer, Download, Wheat, Baby, PackageMinus, PackagePlus, Upload, LogOut, Mail, Lock, Users, UserPlus, Eye, KeyRound
 } from 'lucide-react';
 import ReactDOM from 'react-dom';
 import { supabase, configMissing } from './supabaseClient.js';
@@ -108,21 +108,14 @@ function feedStockValue(feedType, txns) {
   return feedStock(feedType.id, txns) * Number(feedType.costPerBag || 0);
 }
 
-// ---------- Insurance helpers ----------
-function policyStatus(policy) {
-  if (!policy.expiryDate) return { status: 'none' };
-  const daysUntil = diffDays(policy.expiryDate);
+// ---------- Insurance helper (cow-level: insured?, start/expiry, 1-month alert) ----------
+function insuranceStatusFor(cow) {
+  if (!cow.insured || !cow.insuranceExpiryDate) return { status: 'none' };
+  const daysUntil = diffDays(cow.insuranceExpiryDate);
   let status = 'active';
   if (daysUntil < 0) status = 'expired';
   else if (daysUntil <= 30) status = 'expiring';
   return { status, daysUntil };
-}
-function policyTotalPaid(policyId, payments) {
-  return payments.filter((p) => p.policyId === policyId).reduce((s, p) => s + Number(p.amount || 0), 0);
-}
-function policyPaidThisYear(policyId, payments) {
-  const year = todayStr().slice(0, 4);
-  return payments.filter((p) => p.policyId === policyId && p.date.slice(0, 4) === year).reduce((s, p) => s + Number(p.amount || 0), 0);
 }
 
 // ---------- Export helpers (print + CSV download) ----------
@@ -270,6 +263,7 @@ function CowPrintBody({ job }) {
           {cow.inseminatedOn && <>Inseminated on: {fmtDate(cow.inseminatedOn)}</>}
           {cow.mastitisAntibiotic && <><br />Mastitis antibiotic: {cow.mastitisAntibiotic}</>}
           {cow.pregnancyConfirmed && cow.inseminatedOn && <><br />Pregnant — expected calving {fmtDate(addMonths(cow.inseminatedOn, 9))}</>}
+          {cow.insured && <><br />Insured{cow.insuranceExpiryDate ? ` — expires ${fmtDate(cow.insuranceExpiryDate)}` : ''}</>}
         </div>
       </div>
       {milkRows.length > 0 && (
@@ -329,9 +323,10 @@ function cowsExportRows(cows) {
     c.motherCowId ? (nameById[c.motherCowId] || '') : '', c.birthWeight || '',
     c.calvingDate ? fmtDate(c.calvingDate) : '', c.firstHeatDate ? fmtDate(c.firstHeatDate) : '',
     c.inseminatedOn ? fmtDate(c.inseminatedOn) : '', c.mastitisAntibiotic || '',
+    c.insured ? 'Yes' : 'No', c.insuranceStartDate ? fmtDate(c.insuranceStartDate) : '', c.insuranceExpiryDate ? fmtDate(c.insuranceExpiryDate) : '',
   ]);
 }
-const COWS_HEADERS = ['Tag #', 'Name', 'Breed', 'Gender', 'Date of Birth', 'Status', 'Mother', 'Birth Weight (kg)', 'Last Calving', 'First Heat After Calving', 'Inseminated On', 'Mastitis Antibiotic'];
+const COWS_HEADERS = ['Tag #', 'Name', 'Breed', 'Gender', 'Date of Birth', 'Status', 'Mother', 'Birth Weight (kg)', 'Last Calving', 'First Heat After Calving', 'Inseminated On', 'Mastitis Antibiotic', 'Insured', 'Insurance Start', 'Insurance Expiry'];
 
 function milkExportRows(milk, cowById) {
   return milk.slice().sort((a, b) => a.date.localeCompare(b.date)).map((m) => {
@@ -355,12 +350,14 @@ const mapCowFromRow = (r) => ({
   cycleLength: r.cycle_length, calvingDate: r.calving_date || '', firstHeatDate: r.first_heat_date || '',
   inseminatedOn: r.inseminated_on || '', pregnancyConfirmed: !!r.pregnancy_confirmed, mastitisAntibiotic: r.mastitis_antibiotic || '',
   motherCowId: r.mother_cow_id || '', birthWeight: r.birth_weight ?? '', gender: r.gender || '',
+  insured: !!r.insured, insuranceStartDate: r.insurance_start_date || '', insuranceExpiryDate: r.insurance_expiry_date || '',
 });
 const cowToRow = (c, userId) => ({
   user_id: userId, name: c.name, tag_number: c.tagNumber, breed: c.breed, dob: c.dob || null, status: c.status,
   cycle_length: c.cycleLength, calving_date: c.calvingDate || null, first_heat_date: c.firstHeatDate || null,
   inseminated_on: c.inseminatedOn || null, pregnancy_confirmed: !!c.pregnancyConfirmed, mastitis_antibiotic: c.mastitisAntibiotic || null,
   mother_cow_id: c.motherCowId || null, birth_weight: c.birthWeight === '' || c.birthWeight == null ? null : c.birthWeight, gender: c.gender || null,
+  insured: !!c.insured, insurance_start_date: c.insuranceStartDate || null, insurance_expiry_date: c.insuranceExpiryDate || null,
 });
 const mapMilkFromRow = (r) => ({ id: r.id, cowId: r.cow_id, date: r.date, session: r.session, liters: r.liters });
 const milkToRow = (m, userId) => ({ user_id: userId, cow_id: m.cowId, date: m.date, session: m.session, liters: m.liters });
@@ -369,19 +366,6 @@ const heatToRow = (h, userId) => ({ user_id: userId, cow_id: h.cowId, date: h.da
 const mapMedFromRow = (r) => ({ id: r.id, cowId: r.cow_id, date: r.date, type: r.type, medicine: r.medicine || '', description: r.description || '', vet: r.vet || '', nextDueDate: r.next_due_date || '' });
 const medToRow = (m, userId) => ({ user_id: userId, cow_id: m.cowId, date: m.date, type: m.type, medicine: m.medicine || null, description: m.description || null, vet: m.vet || null, next_due_date: m.nextDueDate || null });
 const mapFeedTypeFromRow = (r) => ({ id: r.id, name: r.name, costPerBag: r.cost_per_bag });
-
-const mapPolicyFromRow = (r) => ({
-  id: r.id, provider: r.provider, policyNumber: r.policy_number || '', coverageAmount: r.coverage_amount ?? '',
-  premiumAmount: r.premium_amount ?? '', startDate: r.start_date || '', expiryDate: r.expiry_date || '', notes: r.notes || '',
-});
-const policyToRow = (p, userId) => ({
-  user_id: userId, provider: p.provider, policy_number: p.policyNumber || null,
-  coverage_amount: p.coverageAmount === '' ? null : p.coverageAmount, premium_amount: p.premiumAmount === '' ? null : p.premiumAmount,
-  start_date: p.startDate || null, expiry_date: p.expiryDate || null, notes: p.notes || null,
-});
-const mapPaymentFromRow = (r) => ({ id: r.id, policyId: r.policy_id, date: r.date, amount: r.amount, kind: r.kind, notes: r.notes || '' });
-const paymentToRow = (p, userId) => ({ user_id: userId, policy_id: p.policyId, date: p.date, amount: p.amount, kind: p.kind, notes: p.notes || null });
-const mapPolicyCowFromRow = (r) => ({ id: r.id, policyId: r.policy_id, cowId: r.cow_id });
 const feedTypeToRow = (f, userId) => ({ user_id: userId, name: f.name, cost_per_bag: f.costPerBag });
 const mapFeedTxnFromRow = (r) => ({ id: r.id, feedTypeId: r.feed_type_id, date: r.date, kind: r.kind, bags: r.bags, cost: r.cost, notes: r.notes || '' });
 const feedTxnToRow = (t, userId) => ({ user_id: userId, feed_type_id: t.feedTypeId, date: t.date, kind: t.kind, bags: t.bags, cost: t.cost ?? null, notes: t.notes || null });
@@ -525,211 +509,157 @@ function Segmented({ options, value, onChange }) {
 }
 
 // ================= MAIN APP =================
-// function ManageAccessModal({ ownerId, onClose }) {
-//   const [members, setMembers] = useState([]);
-//   const [invites, setInvites] = useState([]);
-//   const [loading, setLoading] = useState(true);
-//   const [email, setEmail] = useState('');
-//   const [role, setRole] = useState('viewer');
-//   const [busy, setBusy] = useState(false);
-//   const [error, setError] = useState('');
+function ManageAccessModal({ ownerId, onClose }) {
+  const [invites, setInvites] = useState([]);
+  const [members, setMembers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [email, setEmail] = useState('');
+  const [role, setRole] = useState('viewer');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
 
-//   const load = async () => {
-//     setLoading(true);
-//     const [{ data: acc }, { data: inv }] = await Promise.all([
-//       supabase.from('farm_access').select('*').eq('owner_id', ownerId),
-//       supabase.from('farm_invites').select('*').eq('owner_id', ownerId),
-//     ]);
-//     setMembers(acc || []);
-//     setInvites(inv || []);
-//     setLoading(false);
-//   };
+  const load = async () => {
+    setLoading(true);
+    const [{ data: inv }, { data: mem }] = await Promise.all([
+      supabase.from('farm_invites').select('*').eq('owner_id', ownerId).order('created_at', { ascending: false }),
+      supabase.from('farm_access').select('*').eq('owner_id', ownerId).order('created_at', { ascending: false }),
+    ]);
+    setInvites(inv || []);
+    setMembers(mem || []);
+    setLoading(false);
+  };
 
-//   useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-//   const sendInvite = async () => {
-//     setError('');
-//     if (!email.trim() || !email.includes('@')) { setError('Enter a valid email address.'); return; }
-//     setBusy(true);
-//     const { error: err } = await supabase.from('farm_invites').insert({ owner_id: ownerId, email: email.trim().toLowerCase(), role });
-//     setBusy(false);
-//     if (err) { setError('Could not send invite. Please try again.'); return; }
-//     setEmail('');
-//     load();
-//   };
+  const sendInvite = async () => {
+    setError('');
+    if (!email.trim() || !email.includes('@')) { setError('Enter a valid email address.'); return; }
+    setBusy(true);
+    const { error: err } = await supabase.from('farm_invites').insert({ owner_id: ownerId, email: email.trim().toLowerCase(), role });
+    setBusy(false);
+    if (err) { setError('Could not send invite. Please try again.'); return; }
+    setEmail('');
+    load();
+  };
 
-//   const cancelInvite = async (id) => {
-//     await supabase.from('farm_invites').delete().eq('id', id);
-//     load();
-//   };
+  const cancelInvite = async (id) => {
+    await supabase.from('farm_invites').delete().eq('id', id);
+    load();
+  };
 
-//   const revokeAccess = async (id) => {
-//     await supabase.from('farm_access').delete().eq('id', id);
-//     load();
-//   };
+  const revokeMember = async (id) => {
+    await supabase.from('farm_access').delete().eq('id', id);
+    load();
+  };
 
-//   return (
-//     <Modal title="Manage Access" onClose={onClose}>
-//       <div className="ff-body" style={{ fontSize: 12, color: C.sub, marginBottom: 16, lineHeight: 1.5 }}>
-//         Invite people by email to see this farm. <strong>Master</strong> can add, edit, and delete just like you. <strong>Viewer</strong> can only look, not change anything.
-//       </div>
+  return (
+    <Modal title="Manage Access" onClose={onClose}>
+      <div className="ff-body" style={{ fontSize: 12.5, color: C.sub, marginBottom: 16, lineHeight: 1.5 }}>
+        Invite people by email to see this same farm. <strong>Master</strong> can add, edit, and delete just like you. <strong>Viewer</strong> can only look — nothing they do can change your data.
+      </div>
 
-//       <Field label="Invite by email">
-//         <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="someone@example.com" style={inputStyle} />
-//       </Field>
-//       <Field label="Role">
-//         <Segmented options={['viewer', 'master']} value={role} onChange={setRole} />
-//       </Field>
-//       {error && <div style={{ background: C.rustSoft, color: C.rust, borderRadius: 10, padding: 10, fontSize: 12.5, marginBottom: 12 }}>{error}</div>}
-//       <PrimaryButton disabled={busy} onClick={sendInvite}>{busy ? 'Sending…' : 'Send invite'}</PrimaryButton>
+      <Field label="Invite by email">
+        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="someone@example.com" style={inputStyle} />
+      </Field>
+      <Field label="Role">
+        <Segmented options={['viewer', 'master']} value={role} onChange={setRole} />
+      </Field>
+      {error && <div style={{ background: C.rustSoft, color: C.rust, borderRadius: 10, padding: 10, fontSize: 12.5, marginBottom: 12 }}>{error}</div>}
+      <PrimaryButton disabled={busy} onClick={sendInvite}>{busy ? 'Sending…' : 'Send invite'}</PrimaryButton>
 
-//       {loading ? (
-//         <div style={{ fontSize: 12.5, color: C.sub, marginTop: 20 }}>Loading…</div>
-//       ) : (
-//         <>
-//           {invites.length > 0 && (
-//             <>
-//               <SectionTitle title="Pending invites" />
-//               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
-//                 {invites.map((inv) => (
-//                   <div key={inv.id} style={rowCardStyle}>
-//                     <Mail size={16} color={C.grey} />
-//                     <div style={{ flex: 1, marginLeft: 10 }}>
-//                       <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{inv.email}</div>
-//                       <div style={{ fontSize: 11, color: C.sub }}>Waiting to accept · {inv.role === 'master' ? 'Master' : 'Viewer'}</div>
-//                     </div>
-//                     <button onClick={() => cancelInvite(inv.id)} style={{ background: C.greySoft, border: 'none', borderRadius: 8, padding: 6 }}><X size={14} color={C.ink} /></button>
-//                   </div>
-//                 ))}
-//               </div>
-//             </>
-//           )}
+      <div style={{ marginTop: 22 }}>
+        <SectionTitle title="Pending invites" />
+        {loading ? (
+          <MutedNote text="Loading…" />
+        ) : invites.length === 0 ? (
+          <MutedNote text="No pending invites. Sent invites are accepted automatically the moment that person logs in with the same email." />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
+            {invites.map((inv) => (
+              <div key={inv.id} style={rowCardStyle}>
+                <Mail size={16} color={C.grey} />
+                <div style={{ flex: 1, marginLeft: 10 }}>
+                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{inv.email}</div>
+                  <div style={{ fontSize: 11, color: C.sub }}>Waiting to accept · {inv.role}</div>
+                </div>
+                <button onClick={() => cancelInvite(inv.id)} style={{ background: C.greySoft, border: 'none', borderRadius: 8, padding: 6 }}><X size={14} color={C.ink} /></button>
+              </div>
+            ))}
+          </div>
+        )}
 
-//           <SectionTitle title="People with access" />
-//           {members.length === 0 ? (
-//             <MutedNote text="No one else has access to this farm yet." />
-//           ) : (
-//             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-//               {members.map((m) => (
-//                 <div key={m.id} style={rowCardStyle}>
-//                   {m.role === 'master' ? <UserPlus size={16} color={C.green} /> : <Eye size={16} color={C.grey} />}
-//                   <div style={{ flex: 1, marginLeft: 10 }}>
-//                     <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{m.email || 'Member'}</div>
-//                     <div style={{ fontSize: 11, color: C.sub }}>{m.role === 'master' ? 'Master — can edit' : 'Viewer — read only'}</div>
-//                   </div>
-//                   <button onClick={() => revokeAccess(m.id)} style={{ background: C.rustSoft, border: 'none', borderRadius: 8, padding: 6 }}><Trash2 size={14} color={C.rust} /></button>
-//                 </div>
-//               ))}
-//             </div>
-//           )}
-//         </>
-//       )}
-//     </Modal>
-//   );
-// }
+        <SectionTitle title="People with access" />
+        {loading ? (
+          <MutedNote text="Loading…" />
+        ) : members.length === 0 ? (
+          <MutedNote text="Nobody else has access to this farm yet." />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {members.map((m) => (
+              <div key={m.id} style={rowCardStyle}>
+                {m.role === 'master' ? <UserPlus size={16} color={C.green} /> : <Eye size={16} color={C.grey} />}
+                <div style={{ flex: 1, marginLeft: 10 }}>
+                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{m.email || 'Member'}</div>
+                  <div style={{ fontSize: 11, color: C.sub }}>{m.role === 'master' ? 'Master access' : 'View only'}</div>
+                </div>
+                <button onClick={() => revokeMember(m.id)} style={{ background: C.rustSoft, border: 'none', borderRadius: 8, padding: 6 }}><Trash2 size={14} color={C.rust} /></button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
 
-// function ManageAccessModal({ ownerId, onClose }) {
-//   const [invites, setInvites] = useState([]);
-//   const [members, setMembers] = useState([]);
-//   const [loading, setLoading] = useState(true);
-//   const [email, setEmail] = useState('');
-//   const [role, setRole] = useState('viewer');
-//   const [busy, setBusy] = useState(false);
-//   const [error, setError] = useState('');
+function ChangePasswordModal({ onClose }) {
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [done, setDone] = useState(false);
 
-//   const load = async () => {
-//     setLoading(true);
-//     const [{ data: inv }, { data: mem }] = await Promise.all([
-//       supabase.from('farm_invites').select('*').eq('owner_id', ownerId).order('created_at', { ascending: false }),
-//       supabase.from('farm_access').select('*').eq('owner_id', ownerId).order('created_at', { ascending: false }),
-//     ]);
-//     setInvites(inv || []);
-//     setMembers(mem || []);
-//     setLoading(false);
-//   };
+  const submit = async () => {
+    setError('');
+    if (password.length < 6) { setError('Password must be at least 6 characters.'); return; }
+    if (password !== confirm) { setError('Passwords do not match.'); return; }
+    setBusy(true);
+    const { error: err } = await supabase.auth.updateUser({ password });
+    setBusy(false);
+    if (err) { setError(err.message || 'Could not update password. Please try again.'); return; }
+    setDone(true);
+  };
 
-//   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  if (done) {
+    return (
+      <Modal title="Password Changed" onClose={onClose}>
+        <div style={{ background: C.greenSoft, color: C.green, borderRadius: 10, padding: 12, fontSize: 13, marginBottom: 14 }}>
+          Your password has been updated. Use your new password the next time you log in.
+        </div>
+        <PrimaryButton onClick={onClose}>Done</PrimaryButton>
+      </Modal>
+    );
+  }
 
-//   const sendInvite = async () => {
-//     setError('');
-//     if (!email.trim() || !email.includes('@')) { setError('Enter a valid email address.'); return; }
-//     setBusy(true);
-//     const { error: err } = await supabase.from('farm_invites').insert({ owner_id: ownerId, email: email.trim().toLowerCase(), role });
-//     setBusy(false);
-//     if (err) { setError('Could not send invite. Please try again.'); return; }
-//     setEmail('');
-//     load();
-//   };
-
-//   const cancelInvite = async (id) => {
-//     await supabase.from('farm_invites').delete().eq('id', id);
-//     load();
-//   };
-
-//   const revokeMember = async (id) => {
-//     await supabase.from('farm_access').delete().eq('id', id);
-//     load();
-//   };
-
-//   return (
-//     <Modal title="Manage Access" onClose={onClose}>
-//       <div className="ff-body" style={{ fontSize: 12.5, color: C.sub, marginBottom: 16, lineHeight: 1.5 }}>
-//         Invite people by email to see this same farm. <strong>Master</strong> can add, edit, and delete just like you. <strong>Viewer</strong> can only look — nothing they do can change your data.
-//       </div>
-
-//       <Field label="Invite by email">
-//         <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="someone@example.com" style={inputStyle} />
-//       </Field>
-//       <Field label="Role">
-//         <Segmented options={['viewer', 'master']} value={role} onChange={setRole} />
-//       </Field>
-//       {error && <div style={{ background: C.rustSoft, color: C.rust, borderRadius: 10, padding: 10, fontSize: 12.5, marginBottom: 12 }}>{error}</div>}
-//       <PrimaryButton disabled={busy} onClick={sendInvite}>{busy ? 'Sending…' : 'Send invite'}</PrimaryButton>
-
-//       <div style={{ marginTop: 22 }}>
-//         <SectionTitle title="Pending invites" />
-//         {loading ? (
-//           <MutedNote text="Loading…" />
-//         ) : invites.length === 0 ? (
-//           <MutedNote text="No pending invites. Sent invites are accepted automatically the moment that person logs in with the same email." />
-//         ) : (
-//           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
-//             {invites.map((inv) => (
-//               <div key={inv.id} style={rowCardStyle}>
-//                 <Mail size={16} color={C.grey} />
-//                 <div style={{ flex: 1, marginLeft: 10 }}>
-//                   <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{inv.email}</div>
-//                   <div style={{ fontSize: 11, color: C.sub }}>Waiting to accept · {inv.role}</div>
-//                 </div>
-//                 <button onClick={() => cancelInvite(inv.id)} style={{ background: C.greySoft, border: 'none', borderRadius: 8, padding: 6 }}><X size={14} color={C.ink} /></button>
-//               </div>
-//             ))}
-//           </div>
-//         )}
-
-//         <SectionTitle title="People with access" />
-//         {loading ? (
-//           <MutedNote text="Loading…" />
-//         ) : members.length === 0 ? (
-//           <MutedNote text="Nobody else has access to this farm yet." />
-//         ) : (
-//           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-//             {members.map((m) => (
-//               <div key={m.id} style={rowCardStyle}>
-//                 {m.role === 'master' ? <UserPlus size={16} color={C.green} /> : <Eye size={16} color={C.grey} />}
-//                 <div style={{ flex: 1, marginLeft: 10 }}>
-//                   <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{m.email || 'Member'}</div>
-//                   <div style={{ fontSize: 11, color: C.sub }}>{m.role === 'master' ? 'Master access' : 'View only'}</div>
-//                 </div>
-//                 <button onClick={() => revokeMember(m.id)} style={{ background: C.rustSoft, border: 'none', borderRadius: 8, padding: 6 }}><Trash2 size={14} color={C.rust} /></button>
-//               </div>
-//             ))}
-//           </div>
-//         )}
-//       </div>
-//     </Modal>
-//   );
-// }
+  return (
+    <Modal title="Change Password" onClose={onClose}>
+      <Field label="New password">
+        <div style={{ position: 'relative' }}>
+          <Lock size={15} color={C.grey} style={{ position: 'absolute', left: 12, top: 12 }} />
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 6 characters" style={{ ...inputStyle, paddingLeft: 34 }} />
+        </div>
+      </Field>
+      <Field label="Confirm new password">
+        <div style={{ position: 'relative' }}>
+          <Lock size={15} color={C.grey} style={{ position: 'absolute', left: 12, top: 12 }} />
+          <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Re-enter new password" style={{ ...inputStyle, paddingLeft: 34 }} />
+        </div>
+      </Field>
+      {error && <div style={{ background: C.rustSoft, color: C.rust, borderRadius: 10, padding: 10, fontSize: 12.5, marginBottom: 12 }}>{error}</div>}
+      <PrimaryButton disabled={busy} onClick={submit}>{busy ? 'Updating…' : 'Update password'}</PrimaryButton>
+    </Modal>
+  );
+}
 
 function AuthScreen() {
   const [mode, setMode] = useState('login'); // 'login' | 'signup'
@@ -811,9 +741,6 @@ export default function App() {
   const [medical, setMedical] = useState([]);
   const [feedTypes, setFeedTypes] = useState([]);
   const [feedTransactions, setFeedTransactions] = useState([]);
-  const [policies, setPolicies] = useState([]);
-  const [policyCows, setPolicyCows] = useState([]);
-  const [payments, setPayments] = useState([]);
   const [tab, setTab] = useState('home');
   const [openCowId, setOpenCowId] = useState(null);
   const [modal, setModal] = useState(null); // {type, cowId?, editId?}
@@ -946,19 +873,15 @@ export default function App() {
 
   const loadAllData = async () => {
     try {
-      const [c, m, h, med, ft, tx, pol, pc, pay] = await Promise.all([
+      const [c, m, h, med, ft, tx] = await Promise.all([
         fetchTable('cows', mapCowFromRow),
         fetchTable('milk_records', mapMilkFromRow, 'date'),
         fetchTable('heat_records', mapHeatFromRow, 'date'),
         fetchTable('medical_records', mapMedFromRow, 'date'),
         fetchTable('feed_types', mapFeedTypeFromRow),
         fetchTable('feed_transactions', mapFeedTxnFromRow, 'date'),
-        fetchTable('insurance_policies', mapPolicyFromRow),
-        fetchTable('insurance_policy_cows', mapPolicyCowFromRow),
-        fetchTable('insurance_payments', mapPaymentFromRow, 'date'),
       ]);
       setCows(c); setMilk(m); setHeat(h); setMedical(med); setFeedTypes(ft); setFeedTransactions(tx);
-      setPolicies(pol); setPolicyCows(pc); setPayments(pay);
     } catch (e) {
       console.error('Failed to load data', e);
     }
@@ -970,7 +893,7 @@ export default function App() {
       setLoaded(false);
       resolveAccess(session).then(loadAllData);
     } else if (session === null) {
-      setCows([]); setMilk([]); setHeat([]); setMedical([]); setFeedTypes([]); setFeedTransactions([]); setPolicies([]); setPolicyCows([]); setPayments([]); setLoaded(true);
+      setCows([]); setMilk([]); setHeat([]); setMedical([]); setFeedTypes([]); setFeedTransactions([]); setLoaded(true);
     }
   }, [session]);
 
@@ -1018,8 +941,11 @@ export default function App() {
     return medical.filter((m) => m.nextDueDate && diffDays(m.nextDueDate) <= 7).sort((a, b) => a.nextDueDate.localeCompare(b.nextDueDate));
   }, [medical]);
   const insuranceAlerts = useMemo(() => {
-    return policies.filter((p) => { const s = policyStatus(p).status; return s === 'expiring' || s === 'expired'; });
-  }, [policies]);
+    return cows
+      .filter((c) => c.insured && c.insuranceExpiryDate)
+      .map((c) => ({ cow: c, ...insuranceStatusFor(c) }))
+      .filter((x) => x.status === 'expiring' || x.status === 'expired');
+  }, [cows]);
 
   const cowById = (id) => cows.find((c) => c.id === id);
 
@@ -1103,6 +1029,7 @@ export default function App() {
                   sections.push(`${cow.name} — Tag #${cow.tagNumber}`);
                   sections.push(`Breed: ${cow.breed}, DOB: ${fmtDate(cow.dob)}, Status: ${cow.status}`);
                   if (cow.pregnancyConfirmed && cow.inseminatedOn) sections.push(`Pregnant - expected calving ${fmtDate(addMonths(cow.inseminatedOn, 9))}`);
+                  if (cow.insured) sections.push(`Insured${cow.insuranceExpiryDate ? ` - expires ${fmtDate(cow.insuranceExpiryDate)}` : ''}`);
                   if (milkRows.length) sections.push('', 'MILK RECORDS', toCSV(['Date', 'Session', 'Liters'], milkRows));
                   if (heatRows.length) sections.push('', 'HEAT RECORDS', toCSV(['Date', 'Bred', 'Notes'], heatRows));
                   if (medRows.length) sections.push('', 'HEALTH RECORDS', toCSV(['Date', 'Type', 'Medicine', 'Details', 'Vet', 'Next Due'], medRows));
@@ -1118,6 +1045,7 @@ export default function App() {
                   onOpenCow={setOpenCowId} onGoTab={setTab}
                   onBackup={handleBackupClick} onRestore={handleRestoreClick} onSignOut={handleSignOut}
                   onManageAccess={() => setModal({ type: 'manageAccess' })}
+                  onChangePassword={() => setModal({ type: 'changePassword' })}
                   userEmail={session?.user?.email}
                 />
               )}
@@ -1183,39 +1111,6 @@ export default function App() {
                     } else {
                       const csv = ['FEED SUMMARY', toCSV(summaryHeaders, summaryRows), '', 'TRANSACTIONS', toCSV(txnHeaders, txnRows)].join('\n');
                       downloadFile('feed_records.csv', csv);
-                    }
-                  }}
-                />
-              )}
-              {tab === 'insurance' && (
-                <InsuranceScreen
-                  policies={policies} policyCows={policyCows} payments={payments} cows={cows} cowById={cowById}
-                  onAddPolicy={() => setModal({ type: 'policy' })}
-                  onEditPolicy={(id) => setModal({ type: 'policy', editId: id })}
-                  onDeletePolicy={async (id) => {
-                    await supabase.from('insurance_policies').delete().eq('id', id);
-                    setPolicies(policies.filter((p) => p.id !== id));
-                    setPolicyCows(policyCows.filter((pc) => pc.policyId !== id));
-                    setPayments(payments.filter((p) => p.policyId !== id));
-                  }}
-                  onLogPayment={(policyId) => setModal({ type: 'policyPayment', policyId })}
-                  onExport={(kind) => {
-                    const summaryHeaders = ['Provider', 'Policy #', 'Covered Animals', 'Coverage (₹)', 'Premium (₹)', 'Start Date', 'Expiry Date', 'Paid (Total ₹)', 'Status'];
-                    const summaryRows = policies.map((p) => {
-                      const covered = policyCows.filter((pc) => pc.policyId === p.id).map((pc) => cowById(pc.cowId)?.name).filter(Boolean).join(', ');
-                      const st = policyStatus(p);
-                      return [p.provider, p.policyNumber || '', covered, p.coverageAmount || '', p.premiumAmount || '', p.startDate ? fmtDate(p.startDate) : '', p.expiryDate ? fmtDate(p.expiryDate) : '', policyTotalPaid(p.id, payments).toFixed(0), st.status];
-                    });
-                    const paymentHeaders = ['Date', 'Provider', 'Policy #', 'Kind', 'Amount (₹)', 'Notes'];
-                    const paymentRows = payments.slice().sort((a, b) => a.date.localeCompare(b.date)).map((pay) => {
-                      const p = policies.find((x) => x.id === pay.policyId);
-                      return [fmtDate(pay.date), p ? p.provider : 'Unknown', p ? p.policyNumber || '' : '', pay.kind, pay.amount, pay.notes || ''];
-                    });
-                    if (kind === 'print') {
-                      setPrintJob({ type: 'feed', title: 'Insurance Report', summaryHeaders, summaryRows, txnHeaders: paymentHeaders, txnRows: paymentRows });
-                    } else {
-                      const csv = ['POLICIES', toCSV(summaryHeaders, summaryRows), '', 'PAYMENTS', toCSV(paymentHeaders, paymentRows)].join('\n');
-                      downloadFile('insurance_records.csv', csv);
                     }
                   }}
                 />
@@ -1342,50 +1237,13 @@ export default function App() {
             />
           )}
 
-          {modal && modal.type === 'policy' && (
-            <PolicyForm
-              cows={cows}
-              initial={modal.editId ? policies.find((p) => p.id === modal.editId) : null}
-              initialCowIds={modal.editId ? policyCows.filter((pc) => pc.policyId === modal.editId).map((pc) => pc.cowId) : []}
-              onClose={() => setModal(null)}
-              onSave={async ({ cowIds, ...data }) => {
-                let policyId = modal.editId;
-                if (modal.editId) {
-                  await supabase.from('insurance_policies').update(policyToRow(data, userId)).eq('id', modal.editId);
-                  setPolicies(policies.map((p) => (p.id === modal.editId ? { ...p, ...data } : p)));
-                  await supabase.from('insurance_policy_cows').delete().eq('policy_id', modal.editId);
-                  setPolicyCows(policyCows.filter((pc) => pc.policyId !== modal.editId));
-                } else {
-                  const { data: row, error } = await supabase.from('insurance_policies').insert(policyToRow(data, userId)).select().single();
-                  if (error || !row) { setModal(null); return; }
-                  policyId = row.id;
-                  setPolicies([...policies, mapPolicyFromRow(row)]);
-                }
-                if (cowIds.length) {
-                  const linkRows = cowIds.map((cid) => ({ policy_id: policyId, cow_id: cid }));
-                  const { data: links, error: linkErr } = await supabase.from('insurance_policy_cows').insert(linkRows).select();
-                  if (!linkErr && links) setPolicyCows((prev) => [...prev, ...links.map(mapPolicyCowFromRow)]);
-                }
-                setModal(null);
-              }}
-            />
-          )}
-
-          {modal && modal.type === 'policyPayment' && (
-            <PolicyPaymentForm
-              policy={policies.find((p) => p.id === modal.policyId)}
-              onClose={() => setModal(null)}
-              onSave={async (data) => {
-                const { data: row, error } = await supabase.from('insurance_payments').insert(paymentToRow({ ...data, policyId: modal.policyId }, userId)).select().single();
-                if (!error) setPayments([...payments, mapPaymentFromRow(row)]);
-                setModal(null);
-              }}
-            />
-          )}
-
-          {/* {modal && modal.type === 'manageAccess' && (
+          {modal && modal.type === 'manageAccess' && (
             <ManageAccessModal ownerId={session.user.id} onClose={() => setModal(null)} />
-          )} */}
+          )}
+
+          {modal && modal.type === 'changePassword' && (
+            <ChangePasswordModal onClose={() => setModal(null)} />
+          )}
 
           <input ref={fileInputRef} type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={handleFileSelected} />
 
@@ -1424,10 +1282,9 @@ function BottomNav({ tab, setTab }) {
     { key: 'heat', label: 'Heat', icon: HeartPulse },
     { key: 'health', label: 'Health', icon: Stethoscope },
     { key: 'feed', label: 'Feed', icon: Wheat },
-    { key: 'insurance', label: 'Insure', icon: Shield },
   ];
   return (
-    <div style={{ flexShrink: 0, background: '#fff', borderTop: `1px solid ${C.line}`, display: 'flex', padding: '7px 2px', paddingBottom: 'max(9px, calc(env(safe-area-inset-bottom) + 5px))', zIndex: 30 }}>
+    <div style={{ flexShrink: 0, background: '#fff', borderTop: `1px solid ${C.line}`, display: 'flex', padding: '8px 4px', paddingBottom: 'max(10px, calc(env(safe-area-inset-bottom) + 6px))', zIndex: 30 }}>
       {items.map(({ key, label, icon: Icon }) => {
         const active = tab === key;
         return (
@@ -1435,10 +1292,10 @@ function BottomNav({ tab, setTab }) {
             key={key}
             onClick={() => setTab(key)}
             className="ff-body"
-            style={{ flex: 1, background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, color: active ? C.green : C.grey, padding: '3px 0', minHeight: 40 }}
+            style={{ flex: 1, background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, color: active ? C.green : C.grey, padding: '4px 0', minHeight: 44 }}
           >
-            <Icon size={18} strokeWidth={active ? 2.4 : 2} />
-            <span style={{ fontSize: 9.5, fontWeight: active ? 700 : 500 }}>{label}</span>
+            <Icon size={20} strokeWidth={active ? 2.4 : 2} />
+            <span style={{ fontSize: 10.5, fontWeight: active ? 700 : 500 }}>{label}</span>
           </button>
         );
       })}
@@ -1447,7 +1304,7 @@ function BottomNav({ tab, setTab }) {
 }
 
 // ---------- Home ----------
-function HomeScreen({ cows, milkToday, heatAlerts, medDue, insemAlerts, insuranceAlerts, onOpenCow, onGoTab, onBackup, onRestore, onSignOut, onManageAccess, userEmail }) {
+function HomeScreen({ cows, milkToday, heatAlerts, medDue, insemAlerts, insuranceAlerts, onOpenCow, onGoTab, onBackup, onRestore, onSignOut, onManageAccess, onChangePassword, userEmail }) {
   const { role, isReadOnly } = useContext(RoleContext);
   return (
     <div>
@@ -1458,6 +1315,7 @@ function HomeScreen({ cows, milkToday, heatAlerts, medDue, insemAlerts, insuranc
             <HeaderIconButton title="Backup all data" icon={<Download size={15} color="#fff" />} onClick={onBackup} />
             {!isReadOnly && <HeaderIconButton title="Restore from backup" icon={<Upload size={15} color="#fff" />} onClick={onRestore} />}
             {role === 'owner' && <HeaderIconButton title="Manage access" icon={<Users size={15} color="#fff" />} onClick={onManageAccess} />}
+            <HeaderIconButton title="Change password" icon={<KeyRound size={15} color="#fff" />} onClick={onChangePassword} />
             <HeaderIconButton title="Sign out" icon={<LogOut size={15} color="#fff" />} onClick={onSignOut} />
           </div>
         }
@@ -1552,19 +1410,18 @@ function HomeScreen({ cows, milkToday, heatAlerts, medDue, insemAlerts, insuranc
           <>
             <SectionTitle title="Insurance" />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {insuranceAlerts.slice(0, 5).map((p) => {
-                const st = policyStatus(p);
-                return (
-                  <div key={p.id} onClick={() => onGoTab('insurance')} style={rowCardStyle}>
-                    <Shield size={16} color={st.status === 'expired' ? C.rust : C.amber} />
-                    <div style={{ flex: 1, marginLeft: 10 }}>
-                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{p.provider}{p.policyNumber ? ` · #${p.policyNumber}` : ''}</div>
-                      <div style={{ fontSize: 11.5, color: C.sub }}>{st.status === 'expired' ? `Expired ${fmtDateShort(p.expiryDate)}` : `Expires ${fmtDateShort(p.expiryDate)}`}</div>
+              {insuranceAlerts.slice(0, 5).map(({ cow, status, daysUntil }) => (
+                <div key={cow.id} onClick={() => onOpenCow(cow.id)} style={rowCardStyle}>
+                  <EarTag number={cow.tagNumber} size="sm" />
+                  <div style={{ flex: 1, marginLeft: 10 }}>
+                    <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{cow.name}</div>
+                    <div style={{ fontSize: 11.5, color: C.sub }}>
+                      {status === 'expired' ? `Insurance expired ${fmtDateShort(cow.insuranceExpiryDate)}` : `Insurance expires ${fmtDateShort(cow.insuranceExpiryDate)}`}
                     </div>
-                    <Chip bg={st.status === 'expired' ? C.rustSoft : C.amberSoft} fg={st.status === 'expired' ? C.rust : C.amber}>{st.status === 'expired' ? 'Expired' : 'Expiring'}</Chip>
                   </div>
-                );
-              })}
+                  <Chip bg={status === 'expired' ? C.rustSoft : C.amberSoft} fg={status === 'expired' ? C.rust : C.amber}>{status === 'expired' ? 'Expired' : 'Expiring'}</Chip>
+                </div>
+              ))}
             </div>
           </>
         )}
@@ -1739,6 +1596,17 @@ function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus,
               </>
             )}
             {cow.mastitisAntibiotic && <div style={{ marginTop: 6 }}><Chip bg={C.amberSoft} fg={C.amber}>Mastitis: {cow.mastitisAntibiotic}</Chip></div>}
+            {cow.insured && (
+              <div style={{ marginTop: 6 }}>
+                {(() => {
+                  const ist = insuranceStatusFor(cow);
+                  if (ist.status === 'expired') return <Chip bg={C.rustSoft} fg={C.rust}>Insurance expired {fmtDate(cow.insuranceExpiryDate)}</Chip>;
+                  if (ist.status === 'expiring') return <Chip bg={C.amberSoft} fg={C.amber}>Insurance expires {fmtDate(cow.insuranceExpiryDate)}</Chip>;
+                  if (cow.insuranceExpiryDate) return <Chip bg={C.greenSoft} fg={C.green}>Insured until {fmtDate(cow.insuranceExpiryDate)}</Chip>;
+                  return <Chip bg={C.greenSoft} fg={C.green}>Insured</Chip>;
+                })()}
+              </div>
+            )}
             {offspring.length > 0 && <div style={{ fontSize: 11.5, color: C.sub, marginTop: 4 }}>Offspring on record: {offspring.length}</div>}
           </div>
         </div>
@@ -2279,6 +2147,9 @@ function CowForm({ initial, defaultStatus, defaultMotherId, cows, onClose, onSav
   const [inseminatedOn, setInseminatedOn] = useState(initial?.inseminatedOn || '');
   const [pregnancyConfirmed, setPregnancyConfirmed] = useState(initial?.pregnancyConfirmed || false);
   const [mastitisAntibiotic, setMastitisAntibiotic] = useState(initial?.mastitisAntibiotic || '');
+  const [insured, setInsured] = useState(initial?.insured || false);
+  const [insuranceStartDate, setInsuranceStartDate] = useState(initial?.insuranceStartDate || '');
+  const [insuranceExpiryDate, setInsuranceExpiryDate] = useState(initial?.insuranceExpiryDate || '');
   const valid = name.trim() && tagNumber.trim();
   const expectedCalving = pregnancyConfirmed && inseminatedOn ? addMonths(inseminatedOn, 9) : '';
   const isCalf = status === 'calf';
@@ -2349,6 +2220,31 @@ function CowForm({ initial, defaultStatus, defaultMotherId, cows, onClose, onSav
       <Field label="Antibiotic used for mastitis (optional)">
         <input value={mastitisAntibiotic} onChange={(e) => setMastitisAntibiotic(e.target.value)} placeholder="e.g. Amoxicillin" style={inputStyle} />
       </Field>
+
+      <Field label="Insured?">
+        <button
+          type="button"
+          onClick={() => setInsured(!insured)}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, border: `1.5px solid ${insured ? C.green : C.line}`, background: insured ? C.greenSoft : '#fff', borderRadius: 10, padding: '9px 12px', width: '100%' }}
+        >
+          <div style={{ width: 18, height: 18, borderRadius: 5, border: `1.5px solid ${insured ? C.green : C.grey}`, background: insured ? C.green : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            {insured && <Check size={12} color="#fff" />}
+          </div>
+          <span className="ff-body" style={{ fontSize: 13, color: C.ink, fontWeight: 600 }}>Yes, this animal is insured</span>
+        </button>
+      </Field>
+      {insured && (
+        <>
+          <Field label="Insurance start date (optional)">
+            <ClearableDate value={insuranceStartDate} onChange={setInsuranceStartDate} max={todayStr()} />
+          </Field>
+          <Field label="Insurance expiry date (optional)">
+            <ClearableDate value={insuranceExpiryDate} onChange={setInsuranceExpiryDate} />
+            <div className="ff-body" style={{ fontSize: 11, color: C.sub, marginTop: 5 }}>You'll see a reminder starting 1 month before this date.</div>
+          </Field>
+        </>
+      )}
+
       <PrimaryButton
         disabled={!valid}
         onClick={() => onSave({
@@ -2356,6 +2252,7 @@ function CowForm({ initial, defaultStatus, defaultMotherId, cows, onClose, onSav
           motherCowId: isCalf ? motherCowId : '', birthWeight: isCalf && birthWeight !== '' ? Number(birthWeight) : '',
           calvingDate, firstHeatDate, inseminatedOn, pregnancyConfirmed: !!(pregnancyConfirmed && inseminatedOn),
           mastitisAntibiotic: mastitisAntibiotic.trim(),
+          insured, insuranceStartDate: insured ? insuranceStartDate : '', insuranceExpiryDate: insured ? insuranceExpiryDate : '',
         })}
       >
         {initial ? 'Save changes' : isCalf ? 'Add calf' : 'Add cow'}
@@ -2738,224 +2635,6 @@ function FeedTxnForm({ feedType, kind, onClose, onSave }) {
       >
         Save {kind === 'purchase' ? 'purchase' : 'usage'}
       </PrimaryButton>
-    </Modal>
-  );
-}
-
-// ================= INSURANCE =================
-function InsuranceScreen({ policies, policyCows, payments, cows, cowById, onAddPolicy, onEditPolicy, onDeletePolicy, onLogPayment, onExport }) {
-  const { isReadOnly } = useContext(RoleContext);
-  const [confirmDelId, setConfirmDelId] = useState(null);
-  const year = todayStr().slice(0, 4);
-  const totalPaidThisYear = policies.reduce((s, p) => s + policyPaidThisYear(p.id, payments), 0);
-  const activeCount = policies.filter((p) => policyStatus(p).status !== 'expired').length;
-  const expiringSoon = policies.filter((p) => policyStatus(p).status === 'expiring');
-  const expired = policies.filter((p) => policyStatus(p).status === 'expired');
-
-  const coveredNames = (policyId) => policyCows.filter((pc) => pc.policyId === policyId).map((pc) => cowById(pc.cowId)).filter(Boolean);
-
-  return (
-    <div>
-      <ScreenHeader
-        title="Insurance" subtitle="Policies, renewals & payments"
-        right={
-          <div style={{ display: 'flex', gap: 6 }}>
-            <HeaderIconButton title="Print insurance report" icon={<Printer size={15} color="#fff" />} onClick={() => onExport('print')} />
-            <HeaderIconButton title="Download CSV" icon={<Download size={15} color="#fff" />} onClick={() => onExport('csv')} />
-          </div>
-        }
-      />
-      <div style={{ padding: 16 }}>
-        {policies.length > 0 && (
-          <>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 18 }}>
-              <StatCard label="Active policies" value={activeCount} bg={C.greenSoft} fg={C.green} icon={<Shield size={16} />} />
-              <StatCard label="Paid this year" value={`₹${totalPaidThisYear.toFixed(0)}`} bg={C.milkSoft} fg={C.milk} icon={<Download size={16} />} />
-            </div>
-
-            {(expiringSoon.length > 0 || expired.length > 0) && (
-              <>
-                <SectionTitle title="Needs attention" />
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
-                  {expired.map((p) => (
-                    <div key={p.id} style={rowCardStyle}>
-                      <Shield size={16} color={C.rust} />
-                      <div style={{ flex: 1, marginLeft: 10 }}>
-                        <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{p.provider}{p.policyNumber ? ` · #${p.policyNumber}` : ''}</div>
-                        <div style={{ fontSize: 11.5, color: C.sub }}>Expired {fmtDate(p.expiryDate)}</div>
-                      </div>
-                      <Chip bg={C.rustSoft} fg={C.rust}>Expired</Chip>
-                    </div>
-                  ))}
-                  {expiringSoon.map((p) => (
-                    <div key={p.id} style={rowCardStyle}>
-                      <Shield size={16} color={C.amber} />
-                      <div style={{ flex: 1, marginLeft: 10 }}>
-                        <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{p.provider}{p.policyNumber ? ` · #${p.policyNumber}` : ''}</div>
-                        <div style={{ fontSize: 11.5, color: C.sub }}>Expires {fmtDate(p.expiryDate)}</div>
-                      </div>
-                      <Chip bg={C.amberSoft} fg={C.amber}>Expiring soon</Chip>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </>
-        )}
-
-        {!isReadOnly && (
-          <button
-            onClick={onAddPolicy}
-            className="ff-body"
-            style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.green, color: '#fff', border: 'none', borderRadius: 12, padding: '11px 0', fontWeight: 700, fontSize: 13, marginBottom: 16 }}
-          >
-            <Plus size={15} /> Add policy
-          </button>
-        )}
-
-        <SectionTitle title="Policies" />
-        {policies.length === 0 ? (
-          <EmptyState icon={<Shield size={30} />} title="No insurance policies yet" subtitle="Add a policy and link it to one or more animals to start tracking coverage, renewals, and payments." />
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {policies.map((p) => {
-              const st = policyStatus(p);
-              const covered = coveredNames(p.id);
-              const totalPaid = policyTotalPaid(p.id, payments);
-              return (
-                <div key={p.id} style={{ background: '#fff', border: `1px solid ${C.line}`, borderRadius: 14, padding: 14 }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-                    <div style={{ flex: 1 }}>
-                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 14.5, color: C.ink }}>{p.provider}</div>
-                      {p.policyNumber && <div style={{ fontSize: 11.5, color: C.sub, marginTop: 1 }}>Policy #{p.policyNumber}</div>}
-                    </div>
-                    {!isReadOnly && (
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <button onClick={() => onEditPolicy(p.id)} style={{ background: C.greySoft, border: 'none', borderRadius: 8, padding: 5 }}><Pencil size={13} color={C.ink} /></button>
-                        <button onClick={() => setConfirmDelId(p.id)} style={{ background: C.greySoft, border: 'none', borderRadius: 8, padding: 5 }}><Trash2 size={13} color={C.ink} /></button>
-                      </div>
-                    )}
-                  </div>
-
-                  {covered.length > 0 && (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
-                      {covered.map((c) => (
-                        <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 5, background: C.greenSoft, borderRadius: 999, padding: '3px 9px 3px 4px' }}>
-                          <EarTag number={c.tagNumber} size="sm" tone="green" />
-                          <span className="ff-body" style={{ fontSize: 11.5, color: C.green, fontWeight: 600 }}>{c.name}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, margin: '12px 0' }}>
-                    <div>
-                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 15, color: C.ink }}>{p.coverageAmount ? `₹${p.coverageAmount}` : '—'}</div>
-                      <div style={{ fontSize: 10.5, color: C.sub }}>Coverage</div>
-                    </div>
-                    <div>
-                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 15, color: C.milk }}>₹{totalPaid.toFixed(0)}</div>
-                      <div style={{ fontSize: 10.5, color: C.sub }}>Paid (total)</div>
-                    </div>
-                  </div>
-
-                  {p.expiryDate && (
-                    <div style={{ marginBottom: 10 }}>
-                      <Chip
-                        bg={st.status === 'expired' ? C.rustSoft : st.status === 'expiring' ? C.amberSoft : C.greenSoft}
-                        fg={st.status === 'expired' ? C.rust : st.status === 'expiring' ? C.amber : C.green}
-                      >
-                        {st.status === 'expired' ? `Expired ${fmtDate(p.expiryDate)}` : st.status === 'expiring' ? `Expires ${fmtDate(p.expiryDate)}` : `Valid until ${fmtDate(p.expiryDate)}`}
-                      </Chip>
-                    </div>
-                  )}
-
-                  {!isReadOnly && (
-                    <button onClick={() => onLogPayment(p.id)} className="ff-body" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, background: C.greenSoft, color: C.green, border: 'none', borderRadius: 9, padding: '8px 0', fontSize: 12, fontWeight: 700 }}>
-                      <Plus size={13} /> Log payment / renewal
-                    </button>
-                  )}
-
-                  {payments.filter((pay) => pay.policyId === p.id).length > 0 && (
-                    <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {payments.filter((pay) => pay.policyId === p.id).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 3).map((pay) => (
-                        <div key={pay.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: C.sub }}>
-                          <span>{fmtDate(pay.date)} · {pay.kind}</span>
-                          <span style={{ fontWeight: 700, color: C.ink }}>₹{pay.amount}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {confirmDelId && (
-        <Modal title="Delete this policy?" onClose={() => setConfirmDelId(null)}>
-          <div style={{ fontSize: 13, color: C.sub, marginBottom: 14 }}>This removes the policy along with its full payment history. This can't be undone.</div>
-          <PrimaryButton danger onClick={() => { onDeletePolicy(confirmDelId); setConfirmDelId(null); }}>Delete permanently</PrimaryButton>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-function PolicyForm({ cows, initial, initialCowIds, onClose, onSave }) {
-  const [provider, setProvider] = useState(initial?.provider || '');
-  const [policyNumber, setPolicyNumber] = useState(initial?.policyNumber || '');
-  const [coverageAmount, setCoverageAmount] = useState(initial?.coverageAmount ?? '');
-  const [premiumAmount, setPremiumAmount] = useState(initial?.premiumAmount ?? '');
-  const [startDate, setStartDate] = useState(initial?.startDate || '');
-  const [expiryDate, setExpiryDate] = useState(initial?.expiryDate || '');
-  const [notes, setNotes] = useState(initial?.notes || '');
-  const [cowIds, setCowIds] = useState(initialCowIds || []);
-  const valid = provider.trim();
-
-  return (
-    <Modal title={initial ? 'Edit Policy' : 'Add Insurance Policy'} onClose={onClose}>
-      <Field label="Insurance provider"><input value={provider} onChange={(e) => setProvider(e.target.value)} placeholder="e.g. United India Insurance" style={inputStyle} /></Field>
-      <Field label="Policy number (optional)"><input value={policyNumber} onChange={(e) => setPolicyNumber(e.target.value)} placeholder="e.g. CAT-2026-0417" style={inputStyle} /></Field>
-      <Field label="Coverage amount (₹, optional)"><input type="number" min={0} value={coverageAmount} onChange={(e) => setCoverageAmount(e.target.value)} placeholder="e.g. 60000" style={inputStyle} /></Field>
-      <Field label="Premium amount (₹, optional)"><input type="number" min={0} value={premiumAmount} onChange={(e) => setPremiumAmount(e.target.value)} placeholder="e.g. 2500" style={inputStyle} /></Field>
-      <Field label="Start date (optional)"><ClearableDate value={startDate} onChange={setStartDate} /></Field>
-      <Field label="Expiry date (optional)">
-        <ClearableDate value={expiryDate} onChange={setExpiryDate} />
-        <div className="ff-body" style={{ fontSize: 11, color: C.sub, marginTop: 5 }}>You'll see a reminder here once this gets within 30 days of expiring.</div>
-      </Field>
-      <CowMultiPicker cows={cows} selected={cowIds} onChange={setCowIds} />
-      <Field label="Notes (optional)"><input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. covers accidental death only" style={inputStyle} /></Field>
-      <PrimaryButton
-        disabled={!valid}
-        onClick={() => onSave({
-          provider: provider.trim(), policyNumber: policyNumber.trim(),
-          coverageAmount: coverageAmount === '' ? '' : Number(coverageAmount),
-          premiumAmount: premiumAmount === '' ? '' : Number(premiumAmount),
-          startDate, expiryDate, notes: notes.trim(), cowIds,
-        })}
-      >
-        {initial ? 'Save changes' : 'Add policy'}
-      </PrimaryButton>
-    </Modal>
-  );
-}
-
-function PolicyPaymentForm({ policy, onClose, onSave }) {
-  const [date, setDate] = useState(todayStr());
-  const [amount, setAmount] = useState(policy?.premiumAmount || '');
-  const [kind, setKind] = useState('premium');
-  const [notes, setNotes] = useState('');
-  const valid = date && amount !== '' && Number(amount) > 0;
-
-  return (
-    <Modal title={`Log Payment — ${policy ? policy.provider : ''}`} onClose={onClose}>
-      <Field label="Date"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} max={todayStr()} /></Field>
-      <Field label="Type"><Segmented options={['premium', 'renewal']} value={kind} onChange={setKind} /></Field>
-      <Field label="Amount (₹)"><input type="number" min={0} value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="e.g. 2500" style={inputStyle} /></Field>
-      <Field label="Notes (optional)"><input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. paid via UPI" style={inputStyle} /></Field>
-      <PrimaryButton disabled={!valid} onClick={() => onSave({ date, amount: Number(amount), kind, notes: notes.trim() })}>Save payment</PrimaryButton>
     </Modal>
   );
 }
