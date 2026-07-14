@@ -612,7 +612,8 @@ function ManageAccessModal({ ownerId, onClose }) {
   );
 }
 
-function ChangePasswordModal({ onClose }) {
+function ChangePasswordModal({ email, onClose }) {
+  const [currentPassword, setCurrentPassword] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
@@ -621,9 +622,17 @@ function ChangePasswordModal({ onClose }) {
 
   const submit = async () => {
     setError('');
-    if (password.length < 6) { setError('Password must be at least 6 characters.'); return; }
-    if (password !== confirm) { setError('Passwords do not match.'); return; }
+    if (!currentPassword) { setError('Enter your current password.'); return; }
+    if (password.length < 6) { setError('New password must be at least 6 characters.'); return; }
+    if (password !== confirm) { setError('New passwords do not match.'); return; }
     setBusy(true);
+    // Verify the current password by attempting to sign in with it
+    const { error: signInErr } = await supabase.auth.signInWithPassword({ email, password: currentPassword });
+    if (signInErr) {
+      setBusy(false);
+      setError('Current password is incorrect.');
+      return;
+    }
     const { error: err } = await supabase.auth.updateUser({ password });
     setBusy(false);
     if (err) { setError(err.message || 'Could not update password. Please try again.'); return; }
@@ -643,6 +652,12 @@ function ChangePasswordModal({ onClose }) {
 
   return (
     <Modal title="Change Password" onClose={onClose}>
+      <Field label="Current password">
+        <div style={{ position: 'relative' }}>
+          <Lock size={15} color={C.grey} style={{ position: 'absolute', left: 12, top: 12 }} />
+          <input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} placeholder="Your current password" style={{ ...inputStyle, paddingLeft: 34 }} />
+        </div>
+      </Field>
       <Field label="New password">
         <div style={{ position: 'relative' }}>
           <Lock size={15} color={C.grey} style={{ position: 'absolute', left: 12, top: 12 }} />
@@ -1247,7 +1262,7 @@ export default function App() {
           )}
 
           {modal && modal.type === 'changePassword' && (
-            <ChangePasswordModal onClose={() => setModal(null)} />
+            <ChangePasswordModal email={session?.user?.email} onClose={() => setModal(null)} />
           )}
 
           <input ref={fileInputRef} type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={handleFileSelected} />
@@ -1781,9 +1796,10 @@ function ListBlock({ items, empty, addLabel, onAdd, render }) {
 }
 
 // ---------- Milk screen ----------
-function MilkScreen({ cows, milk, cowById, onAdd, onExport }) {
+function MilkScreen({ cows, milk, cowById, onAdd, onExport, onUpdateMilk, onDeleteMilk }) {
   const [date, setDate] = useState(todayStr());
   const [sessionFilter, setSessionFilter] = useState('Both');
+  const [viewing, setViewing] = useState(null); // cowId whose day detail is open
   const dayEntries = milk.filter((m) => m.date === date).sort((a, b) => (a.session > b.session ? 1 : -1));
   const amEntries = dayEntries.filter((m) => m.session === 'AM');
   const pmEntries = dayEntries.filter((m) => m.session === 'PM');
@@ -1811,13 +1827,14 @@ function MilkScreen({ cows, milk, cowById, onAdd, onExport }) {
   const renderEntry = (m) => {
     const cow = cowById(m.cowId);
     return (
-      <div key={m.id} style={rowCardStyle}>
+      <div key={m.id} onClick={() => setViewing(m.cowId)} style={rowCardStyle}>
         {cow && <EarTag number={cow.tagNumber} size="sm" />}
         <div style={{ flex: 1, marginLeft: 10 }}>
           <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{cow ? cow.name : 'Unknown'}</div>
-          <div style={{ fontSize: 11.5, color: C.sub }}>{m.session} session</div>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: m.session === 'AM' ? C.milk : C.amber }}>{m.session} session</div>
         </div>
         <div className="ff-display" style={{ fontWeight: 700, fontSize: 15, color: C.milk }}>{m.liters} L</div>
+        <ChevronRight size={16} color={C.grey} style={{ marginLeft: 6 }} />
       </div>
     );
   };
@@ -1825,18 +1842,21 @@ function MilkScreen({ cows, milk, cowById, onAdd, onExport }) {
   const renderCombined = (r) => {
     const cow = cowById(r.cowId);
     return (
-      <div key={r.cowId} style={{ ...rowCardStyle, alignItems: 'center' }}>
+      <div key={r.cowId} onClick={() => setViewing(r.cowId)} style={{ ...rowCardStyle, alignItems: 'center' }}>
         {cow && <EarTag number={cow.tagNumber} size="sm" />}
         <div style={{ flex: 1, marginLeft: 10 }}>
           <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{cow ? cow.name : 'Unknown'}</div>
-          <div className="ff-body" style={{ fontSize: 12, color: C.ink, marginTop: 2, fontWeight: 700 }}>
-            AM {r.am != null ? `${r.am} L` : '—'} &nbsp;·&nbsp; PM {r.pm != null ? `${r.pm} L` : '—'}
+          <div className="ff-body" style={{ fontSize: 12, marginTop: 2, fontWeight: 700 }}>
+            <span style={{ color: C.milk }}>AM {r.am != null ? `${r.am} L` : '—'}</span>
+            <span style={{ color: C.sub, fontWeight: 500 }}> &nbsp;·&nbsp; </span>
+            <span style={{ color: C.amber }}>PM {r.pm != null ? `${r.pm} L` : '—'}</span>
           </div>
         </div>
-        <div style={{ textAlign: 'center', background: C.milkSoft, borderRadius: 10, padding: '6px 10px' }}>
+        <div style={{ textAlign: 'center', background: C.milkSoft, borderRadius: 10, padding: '6px 10px', marginRight: 4 }}>
           <div className="ff-display" style={{ fontWeight: 700, fontSize: 17, color: C.milk }}>{r.total.toFixed(1)} L</div>
           <div style={{ fontSize: 9.5, color: C.milk, fontWeight: 600, opacity: 0.8 }}>total</div>
         </div>
+        <ChevronRight size={16} color={C.grey} />
       </div>
     );
   };
@@ -1910,6 +1930,17 @@ function MilkScreen({ cows, milk, cowById, onAdd, onExport }) {
         )}
       </div>
       {cows.length > 0 && <FAB onClick={onAdd} label="Log milk" />}
+      {viewing && (
+        <MilkDetailModal
+          cow={cowById(viewing)}
+          date={date}
+          amRecord={amEntries.find((m) => m.cowId === viewing) || null}
+          pmRecord={pmEntries.find((m) => m.cowId === viewing) || null}
+          onUpdate={onUpdateMilk}
+          onDelete={onDeleteMilk}
+          onClose={() => setViewing(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1991,6 +2022,88 @@ function HeatScreen({ cows, heat, heatStatusFor, cowById, onAdd, onOpenCow, onEd
 }
 
 // ---------- Health screen ----------
+function MilkDetailModal({ cow, date, amRecord, pmRecord, onUpdate, onDelete, onClose }) {
+  const [editingSession, setEditingSession] = useState(null); // 'AM' | 'PM' | null
+  const [value, setValue] = useState('');
+  const [confirmDel, setConfirmDel] = useState(null); // record pending delete
+
+  const startEdit = (session, record) => {
+    setEditingSession(session);
+    setValue(String(record.liters));
+  };
+
+  const saveEdit = (record) => {
+    const n = Number(value);
+    if (!isNaN(n) && n >= 0) onUpdate(record.id, n);
+    setEditingSession(null);
+  };
+
+  if (confirmDel) {
+    return (
+      <Modal title="Delete this entry?" onClose={() => setConfirmDel(null)}>
+        <div style={{ fontSize: 13, color: C.sub, marginBottom: 14 }}>
+          This removes the {confirmDel.session} milk entry ({confirmDel.liters} L) for {fmtDate(date)}. This can't be undone.
+        </div>
+        <PrimaryButton danger onClick={() => { onDelete(confirmDel.id); setConfirmDel(null); onClose(); }}>Delete permanently</PrimaryButton>
+      </Modal>
+    );
+  }
+
+  const sessionRow = (label, record) => {
+    const tone = label === 'AM' ? C.milk : C.amber;
+    const toneSoft = label === 'AM' ? C.milkSoft : C.amberSoft;
+    if (!record) {
+      return (
+        <div style={{ background: '#fff', border: `1px solid ${C.line}`, borderRadius: 12, padding: 12, display: 'flex', alignItems: 'center' }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: tone }}>{label}</div>
+          <div style={{ flex: 1, marginLeft: 10, fontSize: 12, color: C.sub }}>Not logged</div>
+        </div>
+      );
+    }
+    const isEditing = editingSession === label;
+    return (
+      <div style={{ background: toneSoft, borderRadius: 12, padding: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: tone, width: 28 }}>{label}</div>
+        <div style={{ flex: 1 }}>
+          {isEditing ? (
+            <input type="number" min={0} step="0.1" value={value} onChange={(e) => setValue(e.target.value)} style={{ ...inputStyle, padding: '7px 10px' }} autoFocus />
+          ) : (
+            <div className="ff-display" style={{ fontWeight: 700, fontSize: 17, color: tone }}>{record.liters} L</div>
+          )}
+        </div>
+        {isEditing ? (
+          <button onClick={() => saveEdit(record)} className="ff-body" style={{ background: C.green, color: '#fff', border: 'none', borderRadius: 8, padding: '7px 12px', fontSize: 12, fontWeight: 700 }}>
+            Save
+          </button>
+        ) : (
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button onClick={() => startEdit(label, record)} style={{ background: '#fff', border: 'none', borderRadius: 8, padding: 6 }}><Pencil size={13} color={C.ink} /></button>
+            <button onClick={() => setConfirmDel({ ...record, session: label })} style={{ background: '#fff', border: 'none', borderRadius: 8, padding: 6 }}><Trash2 size={13} color={C.rust} /></button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <Modal title="Milk Entry" onClose={onClose}>
+      {cow && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+          <EarTag number={cow.tagNumber} size="sm" />
+          <div>
+            <div className="ff-display" style={{ fontWeight: 700, fontSize: 14, color: C.ink }}>{cow.name}</div>
+            <div style={{ fontSize: 11.5, color: C.sub }}>{fmtDate(date)}</div>
+          </div>
+        </div>
+      )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {sessionRow('AM', amRecord)}
+        {sessionRow('PM', pmRecord)}
+      </div>
+    </Modal>
+  );
+}
+
 function HeatDetailModal({ record, cow, onClose, onEdit, onDelete }) {
   const { isReadOnly } = useContext(RoleContext);
   const [confirmDel, setConfirmDel] = useState(false);
