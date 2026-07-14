@@ -207,7 +207,7 @@ const earTagTone = (status) => (status === 'active' ? 'green' : status === 'dry'
 
 function StatusPill({ status }) {
   const map = {
-    active: { bg: C.greenSoft, fg: C.green, label: 'Active' },
+    active: { bg: C.greenSoft, fg: C.green, label: 'Milking' },
     dry: { bg: C.brownSoft, fg: C.brown, label: 'Dry' },
     sold: { bg: C.greySoft, fg: C.grey, label: 'Sold' },
     calf: { bg: C.amberSoft, fg: C.amber, label: 'Calf' },
@@ -486,7 +486,7 @@ function PrimaryButton({ children, onClick, disabled, danger }) {
 }
 
 // ---------- Segmented select ----------
-function Segmented({ options, value, onChange }) {
+function Segmented({ options, value, onChange, labels }) {
   return (
     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
       {options.map((opt) => (
@@ -501,7 +501,7 @@ function Segmented({ options, value, onChange }) {
             borderRadius: 999, padding: '7px 13px', fontSize: 12.5, fontWeight: 600,
           }}
         >
-          {opt}
+          {labels?.[opt] ?? opt}
         </button>
       ))}
     </div>
@@ -863,16 +863,22 @@ export default function App() {
     const myId = mySession.user.id;
     const myEmail = mySession.user.email;
     try {
-      // 1) Accept any pending invite addressed to my email
-      const { data: invites } = await supabase.from('farm_invites').select('*');
+      // 1) Accept any pending invite addressed to my email (and ONLY those —
+      // farm_invites also shows invites I've sent as an owner, which must
+      // never be treated as invites for me to accept)
+      const { data: invites } = await supabase.from('farm_invites').select('*').eq('email', (myEmail || '').toLowerCase());
       if (invites && invites.length) {
         for (const inv of invites) {
+          if (inv.owner_id === myId) { // safety net: never let someone "accept" their own invite
+            await supabase.from('farm_invites').delete().eq('id', inv.id);
+            continue;
+          }
           await supabase.from('farm_access').insert({ owner_id: inv.owner_id, viewer_id: myId, email: myEmail, role: inv.role });
           await supabase.from('farm_invites').delete().eq('id', inv.id);
         }
       }
       // 2) Am I someone else's shared user?
-      const { data: access } = await supabase.from('farm_access').select('*').eq('viewer_id', myId).limit(1);
+      const { data: access } = await supabase.from('farm_access').select('*').eq('viewer_id', myId).neq('owner_id', myId).limit(1);
       if (access && access.length) {
         setOwnerId(access[0].owner_id);
         setRole(access[0].role === 'master' ? 'master' : 'viewer');
@@ -1361,7 +1367,7 @@ function HomeScreen({ cows, milkToday, heatAlerts, medDue, insemAlerts, insuranc
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 18 }}>
           <StatCard label="Milk today" value={`${milkToday.toFixed(1)} L`} bg={C.milkSoft} fg={C.milk} icon={<Droplet size={16} />} onClick={() => onGoTab('milk')} />
-          <StatCard label="Active cows" value={cows.filter((c) => c.status === 'active').length} bg={C.greenSoft} fg={C.green} icon={<CowIcon size={16} />} onClick={() => onGoTab('cows')} />
+          <StatCard label="Milking cows" value={cows.filter((c) => c.status === 'active').length} bg={C.greenSoft} fg={C.green} icon={<CowIcon size={16} />} onClick={() => onGoTab('cows')} />
           <StatCard label="Heat alerts" value={heatAlerts.length} bg={C.rustSoft} fg={C.rust} icon={<HeartPulse size={16} />} onClick={() => onGoTab('heat')} />
           <StatCard label="Health due" value={medDue.length} bg={C.amberSoft} fg={C.amber} icon={<Stethoscope size={16} />} onClick={() => onGoTab('health')} />
         </div>
@@ -1481,6 +1487,7 @@ function CowsScreen({ cows, heatStatusFor, onOpenCow, onAddCow, onAddCalf, onExp
     .filter((c) => {
       if (statusFilter === 'All') return true;
       if (statusFilter === 'Pregnant') return !!c.pregnancyConfirmed;
+      if (statusFilter === 'Milking') return c.status === 'active';
       return c.status === statusFilter.toLowerCase();
     });
   return (
@@ -1519,7 +1526,7 @@ function CowsScreen({ cows, heatStatusFor, onOpenCow, onAddCow, onAddCalf, onExp
         </div>
         <div style={{ marginBottom: 14 }}>
           <Segmented
-            options={['All', 'Active', 'Dry', 'Calf', 'Pregnant']}
+            options={['All', 'Milking', 'Dry', 'Calf', 'Pregnant']}
             value={statusFilter}
             onChange={setStatusFilter}
           />
@@ -1960,7 +1967,7 @@ function HeatScreen({ cows, heat, heatStatusFor, cowById, onAdd, onOpenCow, onEd
       <div style={{ padding: 16 }}>
         <SectionTitle title="Cycle status" />
         {rows.length === 0 ? (
-          <EmptyState icon={<HeartPulse size={30} />} title="No active cows" subtitle="Add an active cow to start tracking heat cycles." />
+          <EmptyState icon={<HeartPulse size={30} />} title="No milking cows" subtitle="Add a milking cow to start tracking heat cycles." />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
             {rows.map(({ cow, status, nextDate, daysUntil }) => (
@@ -2278,7 +2285,7 @@ function CowForm({ initial, defaultStatus, defaultMotherId, cows, onClose, onSav
       <Field label="Name"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Ganga" style={inputStyle} /></Field>
       <Field label="Ear tag number"><input value={tagNumber} onChange={(e) => setTagNumber(e.target.value)} placeholder="e.g. 014" style={inputStyle} /></Field>
       <Field label="Breed"><Segmented options={BREEDS} value={breed} onChange={setBreed} /></Field>
-      <Field label="Status"><Segmented options={['active', 'dry', 'calf', 'sold']} value={status} onChange={setStatus} /></Field>
+      <Field label="Status"><Segmented options={['active', 'dry', 'calf', 'sold']} value={status} onChange={setStatus} labels={{ active: 'Milking', dry: 'Dry', calf: 'Calf', sold: 'Sold' }} /></Field>
 
       {isCalf && (
         <>
@@ -2335,9 +2342,11 @@ function CowForm({ initial, defaultStatus, defaultMotherId, cows, onClose, onSav
         </>
       )}
 
-      <Field label="Antibiotic used for mastitis (optional)">
-        <input value={mastitisAntibiotic} onChange={(e) => setMastitisAntibiotic(e.target.value)} placeholder="e.g. Amoxicillin" style={inputStyle} />
-      </Field>
+      {!isCalf && (
+        <Field label="Antibiotic used for mastitis (optional)">
+          <input value={mastitisAntibiotic} onChange={(e) => setMastitisAntibiotic(e.target.value)} placeholder="e.g. Amoxicillin" style={inputStyle} />
+        </Field>
+      )}
 
       <Field label="Insured?">
         <button
