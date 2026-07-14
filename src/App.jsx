@@ -626,16 +626,17 @@ function ChangePasswordModal({ email, onClose }) {
     if (password.length < 6) { setError('New password must be at least 6 characters.'); return; }
     if (password !== confirm) { setError('New passwords do not match.'); return; }
     setBusy(true);
-    // Verify the current password by attempting to sign in with it
-    const { error: signInErr } = await supabase.auth.signInWithPassword({ email, password: currentPassword });
-    if (signInErr) {
-      setBusy(false);
-      setError('Current password is incorrect.');
+    const { error: err } = await supabase.auth.updateUser({ password, current_password: currentPassword });
+    setBusy(false);
+    if (err) {
+      const msg = (err.message || '').toLowerCase();
+      if (msg.includes('current') || msg.includes('invalid') || msg.includes('incorrect')) {
+        setError('Current password is incorrect.');
+      } else {
+        setError(err.message || 'Could not update password. Please try again.');
+      }
       return;
     }
-    const { error: err } = await supabase.auth.updateUser({ password });
-    setBusy(false);
-    if (err) { setError(err.message || 'Could not update password. Please try again.'); return; }
     setDone(true);
   };
 
