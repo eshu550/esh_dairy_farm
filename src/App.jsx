@@ -1143,11 +1143,16 @@ export default function App() {
 
           {modal && modal.type === 'milk' && (
             <MilkForm
-              cows={cows} defaultCowId={modal.cowId}
+              cows={cows} milk={milk} defaultCowId={modal.cowId}
               onClose={() => setModal(null)}
-              onSave={async (data) => {
-                const { data: row, error } = await supabase.from('milk_records').insert(milkToRow(data, userId)).select().single();
-                if (!error) setMilk([...milk, mapMilkFromRow(row)]);
+              onSave={async ({ existingId, ...data }) => {
+                if (existingId) {
+                  const { data: row, error } = await supabase.from('milk_records').update({ liters: data.liters }).eq('id', existingId).select().single();
+                  if (!error && row) setMilk(milk.map((m) => (m.id === existingId ? mapMilkFromRow(row) : m)));
+                } else {
+                  const { data: row, error } = await supabase.from('milk_records').insert(milkToRow(data, userId)).select().single();
+                  if (!error) setMilk([...milk, mapMilkFromRow(row)]);
+                }
                 setModal(null);
               }}
             />
@@ -1820,17 +1825,17 @@ function MilkScreen({ cows, milk, cowById, onAdd, onExport }) {
   const renderCombined = (r) => {
     const cow = cowById(r.cowId);
     return (
-      <div key={r.cowId} style={{ ...rowCardStyle, alignItems: 'flex-start' }}>
+      <div key={r.cowId} style={{ ...rowCardStyle, alignItems: 'center' }}>
         {cow && <EarTag number={cow.tagNumber} size="sm" />}
         <div style={{ flex: 1, marginLeft: 10 }}>
           <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{cow ? cow.name : 'Unknown'}</div>
-          <div style={{ fontSize: 11.5, color: C.sub, marginTop: 1 }}>
+          <div className="ff-body" style={{ fontSize: 12, color: C.ink, marginTop: 2, fontWeight: 700 }}>
             AM {r.am != null ? `${r.am} L` : '—'} &nbsp;·&nbsp; PM {r.pm != null ? `${r.pm} L` : '—'}
           </div>
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <div className="ff-display" style={{ fontWeight: 700, fontSize: 16, color: C.milk }}>{r.total.toFixed(1)} L</div>
-          <div style={{ fontSize: 10, color: C.sub }}>total</div>
+        <div style={{ textAlign: 'center', background: C.milkSoft, borderRadius: 10, padding: '6px 10px' }}>
+          <div className="ff-display" style={{ fontWeight: 700, fontSize: 17, color: C.milk }}>{r.total.toFixed(1)} L</div>
+          <div style={{ fontSize: 9.5, color: C.milk, fontWeight: 600, opacity: 0.8 }}>total</div>
         </div>
       </div>
     );
@@ -2272,19 +2277,33 @@ function CowPicker({ cows, value, onChange }) {
   );
 }
 
-function MilkForm({ cows, defaultCowId, onClose, onSave }) {
+function MilkForm({ cows, milk, defaultCowId, onClose, onSave }) {
   const [cowId, setCowId] = useState(defaultCowId || '');
   const [date, setDate] = useState(todayStr());
   const [session, setSession] = useState('AM');
   const [liters, setLiters] = useState('');
   const valid = cowId && liters !== '' && Number(liters) >= 0;
+
+  const existing = (milk || []).find((m) => m.cowId === cowId && m.date === date && m.session === session);
+
+  useEffect(() => {
+    setLiters(existing ? String(existing.liters) : '');
+  }, [cowId, date, session]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <Modal title="Log Milk" onClose={onClose}>
       {!defaultCowId && <CowPicker cows={cows} value={cowId} onChange={setCowId} />}
       <Field label="Date"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} max={todayStr()} /></Field>
       <Field label="Session"><Segmented options={['AM', 'PM']} value={session} onChange={setSession} /></Field>
       <Field label="Liters"><input type="number" min={0} step="0.1" value={liters} onChange={(e) => setLiters(e.target.value)} placeholder="e.g. 8.5" style={inputStyle} /></Field>
-      <PrimaryButton disabled={!valid} onClick={() => onSave({ cowId, date, session, liters: Number(liters) })}>Save entry</PrimaryButton>
+      {existing && (
+        <div className="ff-body" style={{ fontSize: 11.5, color: C.sub, marginTop: -8, marginBottom: 14 }}>
+          Already logged for this session — saving will update this entry instead of creating a new one.
+        </div>
+      )}
+      <PrimaryButton disabled={!valid} onClick={() => onSave({ cowId, date, session, liters: Number(liters), existingId: existing ? existing.id : null })}>
+        {existing ? 'Update entry' : 'Save entry'}
+      </PrimaryButton>
     </Modal>
   );
 }
