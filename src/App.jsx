@@ -626,27 +626,44 @@ function ChangePasswordModal({ email, onClose }) {
     if (password.length < 6) { setError('New password must be at least 6 characters.'); return; }
     if (password !== confirm) { setError('New passwords do not match.'); return; }
     setBusy(true);
-    const { error: err } = await supabase.auth.updateUser({ password, current_password: currentPassword });
-    setBusy(false);
-    if (err) {
-      const msg = (err.message || '').toLowerCase();
-      if (msg.includes('current') || msg.includes('invalid') || msg.includes('incorrect')) {
-        setError('Current password is incorrect.');
-      } else {
-        setError(err.message || 'Could not update password. Please try again.');
-      }
+
+    // Step 1: re-authenticate with the current password. This both verifies
+    // it's correct AND guarantees a fresh session, which Supabase requires
+    // for a password change to actually take effect.
+    const { error: signInErr } = await supabase.auth.signInWithPassword({ email, password: currentPassword });
+    if (signInErr) {
+      setBusy(false);
+      setError('Current password is incorrect.');
       return;
     }
+
+    // Step 2: update to the new password (also passing current_password,
+    // which some Supabase versions require even on a fresh session).
+    const { error: err } = await supabase.auth.updateUser({ password, current_password: currentPassword });
+    if (err) {
+      setBusy(false);
+      setError(`Could not update password: ${err.message || 'unknown error'}`);
+      return;
+    }
+
+    // Step 3: mark as done (we'll sign out once they dismiss this dialog,
+    // so they actually get to see the confirmation first).
+    setBusy(false);
     setDone(true);
+  };
+
+  const finish = async () => {
+    await supabase.auth.signOut();
+    onClose();
   };
 
   if (done) {
     return (
-      <Modal title="Password Changed" onClose={onClose}>
+      <Modal title="Password Changed" onClose={finish}>
         <div style={{ background: C.greenSoft, color: C.green, borderRadius: 10, padding: 12, fontSize: 13, marginBottom: 14 }}>
-          Your password has been updated. Use your new password the next time you log in.
+          Your password has been updated. Tap below to sign out — then log back in using your <strong>new</strong> password.
         </div>
-        <PrimaryButton onClick={onClose}>Done</PrimaryButton>
+        <PrimaryButton onClick={finish}>Sign out now</PrimaryButton>
       </Modal>
     );
   }
