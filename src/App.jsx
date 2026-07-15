@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useContext } from 'react';
 import {
   Home, Milk, HeartPulse, Stethoscope, Plus, ArrowLeft, X,
-  Calendar, Search, Check, ChevronRight, Trash2, Pencil, Droplet, Syringe, Printer, Download, Wheat, Baby, PackageMinus, PackagePlus, Upload, LogOut, Mail, Lock, Users, UserPlus, Eye, KeyRound
+  Calendar, Search, Check, ChevronRight, Trash2, Pencil, Droplet, Syringe, Printer, Download, Wheat, Baby, PackageMinus, PackagePlus, Upload, LogOut, Mail, Lock, Users, UserPlus, Eye, KeyRound, UserCircle
 } from 'lucide-react';
 import ReactDOM from 'react-dom';
 import { supabase, configMissing } from './supabaseClient.js';
@@ -612,6 +612,69 @@ function ManageAccessModal({ ownerId, onClose }) {
   );
 }
 
+function ProfileModal({ ownerName, farmName, totalAnimals, email, role, onSaveProfile, onChangePassword, onManageAccess, onSignOut, onClose }) {
+  const [name, setName] = useState(ownerName || '');
+  const [farm, setFarm] = useState(farmName || '');
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const save = async () => {
+    setBusy(true);
+    await onSaveProfile({ ownerName: name.trim(), farmName: farm.trim() });
+    setBusy(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  return (
+    <Modal title="Profile" onClose={onClose}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+        <div style={{ width: 52, height: 52, borderRadius: 999, background: C.greenSoft, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <UserCircle size={30} color={C.green} />
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div className="ff-display" style={{ fontWeight: 700, fontSize: 16, color: C.ink }}>{ownerName || 'Add your name'}</div>
+          <div style={{ fontSize: 11.5, color: C.sub, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{email}</div>
+          {role !== 'owner' && (
+            <div style={{ marginTop: 4 }}>
+              <Chip bg={role === 'master' ? C.greenSoft : C.greySoft} fg={role === 'master' ? C.green : C.grey}>
+                {role === 'master' ? 'Master access' : 'View only'}
+              </Chip>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <Field label="Your name">
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Eshwar" style={inputStyle} />
+      </Field>
+      <Field label="Farm name">
+        <input value={farm} onChange={(e) => setFarm(e.target.value)} placeholder="e.g. Esh Farm" style={inputStyle} />
+      </Field>
+      <PrimaryButton disabled={busy} onClick={save}>{busy ? 'Saving…' : saved ? 'Saved ✓' : 'Save changes'}</PrimaryButton>
+
+      <div style={{ marginTop: 20, background: C.greenSoft, borderRadius: 12, padding: '12px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ fontSize: 12.5, color: C.green, fontWeight: 600 }}>Total animals</div>
+        <div className="ff-display" style={{ fontWeight: 700, fontSize: 18, color: C.green }}>{totalAnimals}</div>
+      </div>
+
+      <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <button onClick={onChangePassword} className="ff-body" style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: `1px solid ${C.line}`, borderRadius: 10, padding: '11px 14px', fontSize: 13, fontWeight: 600, color: C.ink }}>
+          <KeyRound size={16} color={C.grey} /> Change password
+        </button>
+        {role === 'owner' && (
+          <button onClick={onManageAccess} className="ff-body" style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: `1px solid ${C.line}`, borderRadius: 10, padding: '11px 14px', fontSize: 13, fontWeight: 600, color: C.ink }}>
+            <Users size={16} color={C.grey} /> Manage access
+          </button>
+        )}
+        <button onClick={onSignOut} className="ff-body" style={{ display: 'flex', alignItems: 'center', gap: 10, background: C.rustSoft, border: 'none', borderRadius: 10, padding: '11px 14px', fontSize: 13, fontWeight: 700, color: C.rust }}>
+          <LogOut size={16} /> Sign out
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 function ChangePasswordModal({ email, onClose }) {
   const [currentPassword, setCurrentPassword] = useState('');
   const [password, setPassword] = useState('');
@@ -1082,10 +1145,9 @@ export default function App() {
                 <HomeScreen
                   cows={cows} milkToday={milkToday} heatAlerts={heatAlerts} medDue={medDue} insemAlerts={insemAlerts} insuranceAlerts={insuranceAlerts}
                   onOpenCow={setOpenCowId} onGoTab={setTab}
-                  onBackup={handleBackupClick} onRestore={handleRestoreClick} onSignOut={handleSignOut}
-                  onManageAccess={() => setModal({ type: 'manageAccess' })}
-                  onChangePassword={() => setModal({ type: 'changePassword' })}
-                  userEmail={session?.user?.email}
+                  onBackup={handleBackupClick} onRestore={handleRestoreClick}
+                  onOpenProfile={() => setModal({ type: 'profile' })}
+                  farmName={session?.user?.user_metadata?.farm_name}
                 />
               )}
               {tab === 'cows' && (
@@ -1297,6 +1359,23 @@ export default function App() {
             <ChangePasswordModal email={session?.user?.email} onClose={() => setModal(null)} />
           )}
 
+          {modal && modal.type === 'profile' && (
+            <ProfileModal
+              ownerName={session?.user?.user_metadata?.full_name || ''}
+              farmName={session?.user?.user_metadata?.farm_name || ''}
+              totalAnimals={cows.length}
+              email={session?.user?.email}
+              role={role}
+              onSaveProfile={async ({ ownerName, farmName }) => {
+                await supabase.auth.updateUser({ data: { full_name: ownerName, farm_name: farmName } });
+              }}
+              onChangePassword={() => setModal({ type: 'changePassword' })}
+              onManageAccess={() => setModal({ type: 'manageAccess' })}
+              onSignOut={() => { setModal(null); handleSignOut(); }}
+              onClose={() => setModal(null)}
+            />
+          )}
+
           <input ref={fileInputRef} type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={handleFileSelected} />
 
           {restorePending && (
@@ -1356,33 +1435,21 @@ function BottomNav({ tab, setTab }) {
 }
 
 // ---------- Home ----------
-function HomeScreen({ cows, milkToday, heatAlerts, medDue, insemAlerts, insuranceAlerts, onOpenCow, onGoTab, onBackup, onRestore, onSignOut, onManageAccess, onChangePassword, userEmail }) {
-  const { role, isReadOnly } = useContext(RoleContext);
+function HomeScreen({ cows, milkToday, heatAlerts, medDue, insemAlerts, insuranceAlerts, onOpenCow, onGoTab, onBackup, onRestore, onOpenProfile, farmName, userEmail }) {
+  const { isReadOnly } = useContext(RoleContext);
   return (
     <div>
       <ScreenHeader
-        title="Esh Farm" subtitle={`${cows.length} cow${cows.length === 1 ? '' : 's'} on record`}
+        title={farmName || 'My Farm'} subtitle={`${cows.length} cow${cows.length === 1 ? '' : 's'} on record`}
         right={
           <div style={{ display: 'flex', gap: 6 }}>
             <HeaderIconButton title="Backup all data" icon={<Download size={15} color="#fff" />} onClick={onBackup} />
             {!isReadOnly && <HeaderIconButton title="Restore from backup" icon={<Upload size={15} color="#fff" />} onClick={onRestore} />}
-            {role === 'owner' && <HeaderIconButton title="Manage access" icon={<Users size={15} color="#fff" />} onClick={onManageAccess} />}
-            <HeaderIconButton title="Change password" icon={<KeyRound size={15} color="#fff" />} onClick={onChangePassword} />
-            <HeaderIconButton title="Sign out" icon={<LogOut size={15} color="#fff" />} onClick={onSignOut} />
+            <HeaderIconButton title="Profile" icon={<UserCircle size={15} color="#fff" />} onClick={onOpenProfile} />
           </div>
         }
       />
       <div style={{ padding: 16 }}>
-        {userEmail && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-            <div style={{ fontSize: 11, color: C.sub }}>Signed in as {userEmail}</div>
-            {role !== 'owner' && (
-              <Chip bg={role === 'master' ? C.greenSoft : C.greySoft} fg={role === 'master' ? C.green : C.grey}>
-                {role === 'master' ? 'Master access' : 'View only'}
-              </Chip>
-            )}
-          </div>
-        )}
         {isReadOnly && (
           <div style={{ background: C.greySoft, borderRadius: 12, padding: '10px 12px', marginBottom: 12, fontSize: 11.5, color: C.grey, lineHeight: 1.5, display: 'flex', alignItems: 'center', gap: 8 }}>
             <Eye size={14} /> You have view-only access to this farm — adding, editing, and deleting is turned off for your account.
