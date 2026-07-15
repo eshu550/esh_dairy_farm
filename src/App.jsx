@@ -1108,6 +1108,14 @@ export default function App() {
                     if (kind === 'print') setPrintJob({ type: 'list', title: 'Milk Records', headers: MILK_HEADERS, rows });
                     else downloadFile('milk_records.csv', toCSV(MILK_HEADERS, rows));
                   }}
+                  onUpdateMilk={async (id, liters) => {
+                    const { data: row, error } = await supabase.from('milk_records').update({ liters }).eq('id', id).select().single();
+                    if (!error && row) setMilk(milk.map((m) => (m.id === id ? mapMilkFromRow(row) : m)));
+                  }}
+                  onDeleteMilk={async (id) => {
+                    await supabase.from('milk_records').delete().eq('id', id);
+                    setMilk(milk.filter((m) => m.id !== id));
+                  }}
                 />
               )}
               {tab === 'heat' && (
