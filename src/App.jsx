@@ -363,8 +363,8 @@ const mapMilkFromRow = (r) => ({ id: r.id, cowId: r.cow_id, date: r.date, sessio
 const milkToRow = (m, userId) => ({ user_id: userId, cow_id: m.cowId, date: m.date, session: m.session, liters: m.liters });
 const mapHeatFromRow = (r) => ({ id: r.id, cowId: r.cow_id, date: r.date, bred: r.bred, notes: r.notes || '' });
 const heatToRow = (h, userId) => ({ user_id: userId, cow_id: h.cowId, date: h.date, bred: !!h.bred, notes: h.notes || null });
-const mapMedFromRow = (r) => ({ id: r.id, cowId: r.cow_id, date: r.date, type: r.type, medicine: r.medicine || '', description: r.description || '', vet: r.vet || '', nextDueDate: r.next_due_date || '' });
-const medToRow = (m, userId) => ({ user_id: userId, cow_id: m.cowId, date: m.date, type: m.type, medicine: m.medicine || null, description: m.description || null, vet: m.vet || null, next_due_date: m.nextDueDate || null });
+const mapMedFromRow = (r) => ({ id: r.id, cowId: r.cow_id, date: r.date, type: r.type, medicine: r.medicine || '', description: r.description || '', vet: r.vet || '', nextDueDate: r.next_due_date || '', completed: !!r.completed });
+const medToRow = (m, userId) => ({ user_id: userId, cow_id: m.cowId, date: m.date, type: m.type, medicine: m.medicine || null, description: m.description || null, vet: m.vet || null, next_due_date: m.nextDueDate || null, completed: !!m.completed });
 const mapFeedTypeFromRow = (r) => ({ id: r.id, name: r.name, costPerBag: r.cost_per_bag });
 const feedTypeToRow = (f, userId) => ({ user_id: userId, name: f.name, cost_per_bag: f.costPerBag });
 const mapFeedTxnFromRow = (r) => ({ id: r.id, feedTypeId: r.feed_type_id, date: r.date, kind: r.kind, bags: r.bags, cost: r.cost, notes: r.notes || '' });
@@ -1040,7 +1040,7 @@ export default function App() {
   const heatAlerts = useMemo(() => activeCows.map((c) => ({ cow: c, ...heatStatusFor(c) })).filter((x) => x.status === 'due' || x.status === 'overdue'), [activeCows, heat]);
   const insemAlerts = useMemo(() => activeCows.map((c) => ({ cow: c, ...inseminationStatusFor(c) })).filter((x) => x.status === 'due'), [activeCows]);
   const medDue = useMemo(() => {
-    return medical.filter((m) => m.nextDueDate && diffDays(m.nextDueDate) <= 7).sort((a, b) => a.nextDueDate.localeCompare(b.nextDueDate));
+    return medical.filter((m) => m.nextDueDate && !m.completed && diffDays(m.nextDueDate) <= 7).sort((a, b) => a.nextDueDate.localeCompare(b.nextDueDate));
   }, [medical]);
   const insuranceAlerts = useMemo(() => {
     return cows
@@ -1116,6 +1116,11 @@ export default function App() {
               onEditHeat={onEditHeat}
               onDeleteHeat={onDeleteHeat}
               onAddMedical={() => setModal({ type: 'medical', cowId: openCowId })}
+              onToggleMedComplete={async (record) => {
+                const completed = !record.completed;
+                const { data: row, error } = await supabase.from('medical_records').update({ completed }).eq('id', record.id).select().single();
+                if (!error && row) setMedical(medical.map((m) => (m.id === record.id ? mapMedFromRow(row) : m)));
+              }}
               onAddCalf={() => setModal({ type: 'cow', defaultStatus: 'calf', defaultMotherId: openCowId })}
               onOpenCow={setOpenCowId}
               onExport={(kind) => {
@@ -1191,6 +1196,11 @@ export default function App() {
                     if (kind === 'print') setPrintJob({ type: 'list', title: 'Health Records', headers: MED_HEADERS, rows });
                     else downloadFile('health_records.csv', toCSV(MED_HEADERS, rows));
                   }}
+                  onToggleComplete={async (record) => {
+                    const completed = !record.completed;
+                    const { data: row, error } = await supabase.from('medical_records').update({ completed }).eq('id', record.id).select().single();
+                    if (!error && row) setMedical(medical.map((m) => (m.id === record.id ? mapMedFromRow(row) : m)));
+                  }}
                 />
               )}
               {tab === 'feed' && (
@@ -1204,6 +1214,17 @@ export default function App() {
                     setFeedTransactions(feedTransactions.filter((t) => t.feedTypeId !== id));
                   }}
                   onLogTxn={(feedTypeId, kind) => setModal({ type: 'feedTxn', feedTypeId, kind })}
+                  onUpdateTxn={async (id, data) => {
+                    const patch = {};
+                    if (data.bags != null) patch.bags = data.bags;
+                    if ('cost' in data) patch.cost = data.cost;
+                    const { data: row, error } = await supabase.from('feed_transactions').update(patch).eq('id', id).select().single();
+                    if (!error && row) setFeedTransactions(feedTransactions.map((t) => (t.id === id ? mapFeedTxnFromRow(row) : t)));
+                  }}
+                  onDeleteTxn={async (id) => {
+                    await supabase.from('feed_transactions').delete().eq('id', id);
+                    setFeedTransactions(feedTransactions.filter((t) => t.id !== id));
+                  }}
                   onExport={(kind) => {
                     const summaryHeaders = ['Feed Type', 'Cost/Bag (₹)', 'Bags Left', 'Purchased (Total)', 'Used (Total)', 'Amount Debited (₹)', 'Stock Value / Saved (₹)'];
                     const summaryRows = feedTypes.map((f) => [
@@ -1662,7 +1683,7 @@ function CowsScreen({ cows, heatStatusFor, onOpenCow, onAddCow, onAddCalf, onExp
 }
 
 // ---------- Cow detail ----------
-function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus, onBack, onEdit, onDelete, onAddMilk, onAddHeat, onAddMedical, onAddCalf, onOpenCow, onEditHeat, onDeleteHeat, onExport }) {
+function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus, onBack, onEdit, onDelete, onAddMilk, onAddHeat, onAddMedical, onAddCalf, onOpenCow, onEditHeat, onDeleteHeat, onToggleMedComplete, onExport }) {
   const { isReadOnly } = useContext(RoleContext);
   const [sub, setSub] = useState('milk');
   const [confirmDel, setConfirmDel] = useState(false);
@@ -1823,7 +1844,13 @@ function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus,
                   <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{m.type}</div>
                   <div style={{ fontSize: 11.5, color: C.sub, marginTop: 1 }}>{fmtDate(m.date)}{m.vet ? ` · ${m.vet}` : ''}</div>
                   {m.medicine && <div style={{ fontSize: 12, color: C.ink, marginTop: 4 }}>Medicine: {m.medicine}</div>}
-                  {m.nextDueDate && <div style={{ fontSize: 11, color: C.amber, marginTop: 4, fontWeight: 600 }}>Next due {fmtDateShort(m.nextDueDate)}</div>}
+                  {m.nextDueDate && (
+                    m.completed ? (
+                      <div style={{ marginTop: 5 }}><Chip bg={C.greenSoft} fg={C.green}>Completed</Chip></div>
+                    ) : (
+                      <div style={{ fontSize: 11, color: C.amber, marginTop: 4, fontWeight: 600 }}>Next due {fmtDateShort(m.nextDueDate)}</div>
+                    )
+                  )}
                 </div>
                 <ChevronRight size={16} color={C.grey} />
               </div>
@@ -1863,7 +1890,14 @@ function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus,
           <PrimaryButton danger onClick={onDelete}>Delete permanently</PrimaryButton>
         </Modal>
       )}
-      {viewingMed && <HealthDetailModal record={viewingMed} cow={cow} onClose={() => setViewingMed(null)} />}
+      {viewingMed && (
+        <HealthDetailModal
+          record={viewingMed}
+          cow={cow}
+          onClose={() => setViewingMed(null)}
+          onToggleComplete={(r) => { onToggleMedComplete(r); setViewingMed({ ...r, completed: !r.completed }); }}
+        />
+      )}
       {viewingHeat && (
         <HeatDetailModal
           record={viewingHeat}
@@ -2246,7 +2280,7 @@ function HeatDetailModal({ record, cow, onClose, onEdit, onDelete }) {
   );
 }
 
-function HealthDetailModal({ record, cow, onClose }) {
+function HealthDetailModal({ record, cow, onClose, onToggleComplete }) {
   if (!record) return null;
   return (
     <Modal title="Health Record" onClose={onClose}>
@@ -2259,14 +2293,35 @@ function HealthDetailModal({ record, cow, onClose }) {
           </div>
         </div>
       )}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: record.nextDueDate ? 18 : 0 }}>
         <DetailRow label="Date" value={fmtDate(record.date)} />
         <DetailRow label="Type" value={record.type} />
         {record.medicine && <DetailRow label="Medicine used" value={record.medicine} />}
         {record.description && <DetailRow label="Details" value={record.description} />}
         {record.vet && <DetailRow label="Vet / attended by" value={record.vet} />}
-        {record.nextDueDate && <DetailRow label="Next follow-up" value={fmtDate(record.nextDueDate)} />}
+        {record.nextDueDate && (
+          <div>
+            <div className="ff-body" style={{ fontSize: 11, fontWeight: 600, color: C.sub, marginBottom: 2 }}>Next follow-up</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div className="ff-body" style={{ fontSize: 13.5, color: C.ink, lineHeight: 1.5 }}>{fmtDate(record.nextDueDate)}</div>
+              {record.completed && <Chip bg={C.greenSoft} fg={C.green}>Completed</Chip>}
+            </div>
+          </div>
+        )}
       </div>
+      {record.nextDueDate && (
+        <button
+          onClick={() => onToggleComplete(record)}
+          className="ff-body"
+          style={{
+            width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            background: record.completed ? C.greySoft : C.greenSoft, color: record.completed ? C.ink : C.green,
+            border: 'none', borderRadius: 10, padding: '11px 0', fontSize: 13, fontWeight: 700,
+          }}
+        >
+          <Check size={15} /> {record.completed ? 'Mark as not completed' : 'Mark as completed'}
+        </button>
+      )}
     </Modal>
   );
 }
@@ -2280,7 +2335,7 @@ function DetailRow({ label, value }) {
   );
 }
 
-function HealthScreen({ medical, cowById, onAdd, onExport }) {
+function HealthScreen({ medical, cowById, onAdd, onExport, onToggleComplete }) {
   const rows = medical.slice().sort((a, b) => b.date.localeCompare(a.date));
   const [viewing, setViewing] = useState(null);
   return (
@@ -2301,8 +2356,8 @@ function HealthScreen({ medical, cowById, onAdd, onExport }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {rows.map((m) => {
               const cow = cowById(m.cowId);
-              const overdue = m.nextDueDate && diffDays(m.nextDueDate) < 0;
-              const soon = m.nextDueDate && diffDays(m.nextDueDate) >= 0 && diffDays(m.nextDueDate) <= 7;
+              const overdue = m.nextDueDate && !m.completed && diffDays(m.nextDueDate) < 0;
+              const soon = m.nextDueDate && !m.completed && diffDays(m.nextDueDate) >= 0 && diffDays(m.nextDueDate) <= 7;
               return (
                 <div key={m.id} onClick={() => setViewing(m)} style={{ ...rowCardStyle, alignItems: 'flex-start' }}>
                   {cow && <EarTag number={cow.tagNumber} size="sm" />}
@@ -2312,9 +2367,13 @@ function HealthScreen({ medical, cowById, onAdd, onExport }) {
                     {m.medicine && <div style={{ fontSize: 12, color: C.ink, marginTop: 4 }}>Medicine: {m.medicine}</div>}
                     {m.nextDueDate && (
                       <div style={{ marginTop: 5 }}>
-                        <Chip bg={overdue ? C.rustSoft : soon ? C.amberSoft : C.greySoft} fg={overdue ? C.rust : soon ? C.amber : C.grey}>
-                          {overdue ? 'Follow-up overdue' : `Follow-up ${fmtDateShort(m.nextDueDate)}`}
-                        </Chip>
+                        {m.completed ? (
+                          <Chip bg={C.greenSoft} fg={C.green}>Completed</Chip>
+                        ) : (
+                          <Chip bg={overdue ? C.rustSoft : soon ? C.amberSoft : C.greySoft} fg={overdue ? C.rust : soon ? C.amber : C.grey}>
+                            {overdue ? 'Follow-up overdue' : `Follow-up ${fmtDateShort(m.nextDueDate)}`}
+                          </Chip>
+                        )}
                       </div>
                     )}
                   </div>
@@ -2325,7 +2384,7 @@ function HealthScreen({ medical, cowById, onAdd, onExport }) {
           </div>
         )}
       </div>
-      {viewing && <HealthDetailModal record={viewing} cow={cowById(viewing.cowId)} onClose={() => setViewing(null)} />}
+      {viewing && <HealthDetailModal record={viewing} cow={cowById(viewing.cowId)} onClose={() => setViewing(null)} onToggleComplete={(r) => { onToggleComplete(r); setViewing({ ...r, completed: !r.completed }); }} />}
       <FAB onClick={onAdd} label="Add record" />
     </div>
   );
@@ -2690,8 +2749,9 @@ function MedicalForm({ cows, defaultCowId, onClose, onSave }) {
 }
 
 // ================= FEED MANAGEMENT =================
-function FeedScreen({ feedTypes, feedTransactions, onAddType, onEditType, onDeleteType, onLogTxn, onExport }) {
+function FeedScreen({ feedTypes, feedTransactions, onAddType, onEditType, onDeleteType, onLogTxn, onUpdateTxn, onDeleteTxn, onExport }) {
   const { isReadOnly } = useContext(RoleContext);
+  const [viewingTxn, setViewingTxn] = useState(null);
   const month = currentMonthStr();
   const totalSpendThisMonth = feedTypes.reduce((s, f) => s + feedMonthSpend(f.id, feedTransactions, month), 0);
   const totalPurchased = feedTypes.reduce((s, f) => s + feedTotalPurchased(f.id, feedTransactions), 0);
@@ -2816,7 +2876,7 @@ function FeedScreen({ feedTypes, feedTransactions, onAddType, onEditType, onDele
             {recent.map((t) => {
               const f = feedTypes.find((x) => x.id === t.feedTypeId);
               return (
-                <div key={t.id} style={rowCardStyle}>
+                <div key={t.id} onClick={() => setViewingTxn(t)} style={rowCardStyle}>
                   <div style={{ color: t.kind === 'purchase' ? C.green : C.grey }}>
                     {t.kind === 'purchase' ? <PackagePlus size={16} /> : <PackageMinus size={16} />}
                   </div>
@@ -2824,12 +2884,22 @@ function FeedScreen({ feedTypes, feedTransactions, onAddType, onEditType, onDele
                     <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{f ? f.name : 'Unknown'} · {t.bags} bags</div>
                     <div style={{ fontSize: 11.5, color: C.sub }}>{fmtDate(t.date)} · {t.kind === 'purchase' ? `Purchased${t.cost ? ` · ₹${t.cost}` : ''}` : 'Used'}</div>
                   </div>
+                  <ChevronRight size={16} color={C.grey} />
                 </div>
               );
             })}
           </div>
         )}
       </div>
+      {viewingTxn && (
+        <FeedTxnDetailModal
+          record={viewingTxn}
+          feedType={feedTypes.find((f) => f.id === viewingTxn.feedTypeId)}
+          onClose={() => setViewingTxn(null)}
+          onUpdate={(id, data) => { onUpdateTxn(id, data); setViewingTxn(null); }}
+          onDelete={(id) => { onDeleteTxn(id); setViewingTxn(null); }}
+        />
+      )}
       <FAB onClick={onAddType} label="Add feed type" />
     </div>
   );
@@ -2869,6 +2939,75 @@ function FeedTxnForm({ feedType, kind, onClose, onSave }) {
       >
         Save {kind === 'purchase' ? 'purchase' : 'usage'}
       </PrimaryButton>
+    </Modal>
+  );
+}
+
+function FeedTxnDetailModal({ record, feedType, onClose, onUpdate, onDelete }) {
+  const { isReadOnly } = useContext(RoleContext);
+  const [editing, setEditing] = useState(false);
+  const [bags, setBags] = useState(String(record.bags));
+  const [cost, setCost] = useState(record.cost != null ? String(record.cost) : '');
+  const [confirmDel, setConfirmDel] = useState(false);
+
+  if (confirmDel) {
+    return (
+      <Modal title="Delete this entry?" onClose={() => setConfirmDel(false)}>
+        <div style={{ fontSize: 13, color: C.sub, marginBottom: 14 }}>
+          This removes this {record.kind} entry ({record.bags} bags) for {fmtDate(record.date)}. This can't be undone.
+        </div>
+        <PrimaryButton danger onClick={() => onDelete(record.id)}>Delete permanently</PrimaryButton>
+      </Modal>
+    );
+  }
+
+  const save = () => {
+    const n = Number(bags);
+    if (isNaN(n) || n <= 0) return;
+    const data = { bags: n };
+    if (record.kind === 'purchase') data.cost = cost === '' ? null : Number(cost);
+    onUpdate(record.id, data);
+  };
+
+  return (
+    <Modal title={`${record.kind === 'purchase' ? 'Purchase' : 'Usage'} Entry`} onClose={onClose}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+        <div style={{ color: record.kind === 'purchase' ? C.green : C.grey }}>
+          {record.kind === 'purchase' ? <PackagePlus size={18} /> : <PackageMinus size={18} />}
+        </div>
+        <div>
+          <div className="ff-display" style={{ fontWeight: 700, fontSize: 14, color: C.ink }}>{feedType ? feedType.name : 'Unknown feed'}</div>
+          <div style={{ fontSize: 11.5, color: C.sub }}>{fmtDate(record.date)}</div>
+        </div>
+      </div>
+
+      {editing ? (
+        <>
+          <Field label="Bags"><input type="number" min={0} step="0.5" value={bags} onChange={(e) => setBags(e.target.value)} style={inputStyle} /></Field>
+          {record.kind === 'purchase' && (
+            <Field label="Total cost (₹)"><input type="number" min={0} value={cost} onChange={(e) => setCost(e.target.value)} style={inputStyle} /></Field>
+          )}
+          <PrimaryButton onClick={save}>Save changes</PrimaryButton>
+        </>
+      ) : (
+        <>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 18 }}>
+            <DetailRow label="Bags" value={`${record.bags} bags`} />
+            {record.kind === 'purchase' && <DetailRow label="Total cost" value={record.cost ? `₹${record.cost}` : '—'} />}
+            {record.notes && <DetailRow label="Notes" value={record.notes} />}
+          </div>
+          {!isReadOnly && (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => setEditing(true)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.greenSoft, color: C.green, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 13, fontWeight: 700 }}>
+                <Pencil size={14} /> Edit
+              </button>
+              <button onClick={() => setConfirmDel(true)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.rustSoft, color: C.rust, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 13, fontWeight: 700 }}>
+                <Trash2 size={14} /> Delete
+              </button>
+            </div>
+          )}
+        </>
+      )}
     </Modal>
   );
 }
