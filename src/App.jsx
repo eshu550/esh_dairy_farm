@@ -1685,7 +1685,10 @@ function CowsScreen({ cows, heatStatusFor, onOpenCow, onAddCow, onAddCalf, onExp
 // ---------- Cow detail ----------
 function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus, onBack, onEdit, onDelete, onAddMilk, onAddHeat, onAddMedical, onAddCalf, onOpenCow, onEditHeat, onDeleteHeat, onToggleMedComplete, onExport }) {
   const { isReadOnly } = useContext(RoleContext);
-  const [sub, setSub] = useState('milk');
+  const [sub, setSub] = useState(cow?.status === 'calf' ? 'health' : 'milk');
+  useEffect(() => {
+    if (cow?.status === 'calf' && (sub === 'milk' || sub === 'calves')) setSub('health');
+  }, [cow?.id, cow?.status]); // eslint-disable-line react-hooks/exhaustive-deps
   const [confirmDel, setConfirmDel] = useState(false);
   const [viewingMed, setViewingMed] = useState(null);
   const [viewingHeat, setViewingHeat] = useState(null);
@@ -1790,7 +1793,11 @@ function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus,
         )}
 
         <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
-          <Segmented options={['Milk', 'Heat', 'Health', 'Calves']} value={sub === 'milk' ? 'Milk' : sub === 'heat' ? 'Heat' : sub === 'health' ? 'Health' : 'Calves'} onChange={(v) => setSub(v.toLowerCase())} />
+          {cow.status === 'calf' ? (
+            <Segmented options={['Heat', 'Health']} value={sub === 'heat' ? 'Heat' : 'Health'} onChange={(v) => setSub(v.toLowerCase())} />
+          ) : (
+            <Segmented options={['Milk', 'Heat', 'Health', 'Calves']} value={sub === 'milk' ? 'Milk' : sub === 'heat' ? 'Heat' : sub === 'health' ? 'Health' : 'Calves'} onChange={(v) => setSub(v.toLowerCase())} />
+          )}
         </div>
 
         {sub === 'milk' && (
