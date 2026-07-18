@@ -839,6 +839,8 @@ export default function App() {
   const [feedTransactions, setFeedTransactions] = useState([]);
   const [tab, setTab] = useState('home');
   const [openCowId, setOpenCowId] = useState(null);
+  const [openCowTab, setOpenCowTab] = useState(null);
+  const openCowAt = (id, tabName) => { setOpenCowId(id); setOpenCowTab(tabName); };
   const [modal, setModal] = useState(null); // {type, cowId?, editId?}
   const [printJob, setPrintJob] = useState(null);
   const [restorePending, setRestorePending] = useState(null);
@@ -1101,7 +1103,8 @@ export default function App() {
               milk={milk} heat={heat} medical={medical} allCows={cows}
               heatStatus={heatStatusFor(cowById(openCowId))}
               insemStatus={inseminationStatusFor(cowById(openCowId))}
-              onBack={() => setOpenCowId(null)}
+              initialTab={openCowTab}
+              onBack={() => { setOpenCowId(null); setOpenCowTab(null); }}
               onEdit={() => setModal({ type: 'cow', editId: openCowId })}
               onDelete={async () => {
                 await supabase.from('cows').delete().eq('id', openCowId);
@@ -1149,7 +1152,7 @@ export default function App() {
               {tab === 'home' && (
                 <HomeScreen
                   cows={cows} milkToday={milkToday} heatAlerts={heatAlerts} medDue={medDue} insemAlerts={insemAlerts} insuranceAlerts={insuranceAlerts}
-                  onOpenCow={setOpenCowId} onGoTab={setTab}
+                  onOpenCow={setOpenCowId} onOpenCowTab={openCowAt} onGoTab={setTab}
                   onBackup={handleBackupClick} onRestore={handleRestoreClick}
                   onOpenProfile={() => setModal({ type: 'profile' })}
                   farmName={session?.user?.user_metadata?.farm_name}
@@ -1456,7 +1459,7 @@ function BottomNav({ tab, setTab }) {
 }
 
 // ---------- Home ----------
-function HomeScreen({ cows, milkToday, heatAlerts, medDue, insemAlerts, insuranceAlerts, onOpenCow, onGoTab, onBackup, onRestore, onOpenProfile, farmName, userEmail }) {
+function HomeScreen({ cows, milkToday, heatAlerts, medDue, insemAlerts, insuranceAlerts, onOpenCow, onOpenCowTab, onGoTab, onBackup, onRestore, onOpenProfile, farmName, userEmail }) {
   const { isReadOnly } = useContext(RoleContext);
   return (
     <div>
@@ -1492,7 +1495,7 @@ function HomeScreen({ cows, milkToday, heatAlerts, medDue, insemAlerts, insuranc
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
             {insemAlerts.map(({ cow, daysUntil }) => (
-              <div key={cow.id} onClick={() => onOpenCow(cow.id)} style={rowCardStyle}>
+              <div key={cow.id} onClick={() => onOpenCowTab(cow.id, 'heat')} style={rowCardStyle}>
                 <EarTag number={cow.tagNumber} size="sm" />
                 <div style={{ flex: 1, marginLeft: 10 }}>
                   <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{cow.name}</div>
@@ -1512,7 +1515,7 @@ function HomeScreen({ cows, milkToday, heatAlerts, medDue, insemAlerts, insuranc
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
             {heatAlerts.map(({ cow, status, daysUntil }) => (
-              <div key={cow.id} onClick={() => onOpenCow(cow.id)} style={rowCardStyle}>
+              <div key={cow.id} onClick={() => onOpenCowTab(cow.id, 'heat')} style={rowCardStyle}>
                 <EarTag number={cow.tagNumber} size="sm" />
                 <div style={{ flex: 1, marginLeft: 10 }}>
                   <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{cow.name}</div>
@@ -1533,7 +1536,7 @@ function HomeScreen({ cows, milkToday, heatAlerts, medDue, insemAlerts, insuranc
               const cow = cows.find((c) => c.id === m.cowId);
               const overdue = diffDays(m.nextDueDate) < 0;
               return (
-                <div key={m.id} onClick={() => cow && onOpenCow(cow.id)} style={rowCardStyle}>
+                <div key={m.id} onClick={() => cow && onOpenCowTab(cow.id, 'health')} style={rowCardStyle}>
                   {cow && <EarTag number={cow.tagNumber} size="sm" />}
                   <div style={{ flex: 1, marginLeft: 10 }}>
                     <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{cow ? cow.name : 'Unknown'} · {m.type}</div>
@@ -1683,12 +1686,13 @@ function CowsScreen({ cows, heatStatusFor, onOpenCow, onAddCow, onAddCalf, onExp
 }
 
 // ---------- Cow detail ----------
-function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus, onBack, onEdit, onDelete, onAddMilk, onAddHeat, onAddMedical, onAddCalf, onOpenCow, onEditHeat, onDeleteHeat, onToggleMedComplete, onExport }) {
+function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus, initialTab, onBack, onEdit, onDelete, onAddMilk, onAddHeat, onAddMedical, onAddCalf, onOpenCow, onEditHeat, onDeleteHeat, onToggleMedComplete, onExport }) {
   const { isReadOnly } = useContext(RoleContext);
-  const [sub, setSub] = useState(cow?.status === 'calf' ? 'health' : 'milk');
+  const [sub, setSub] = useState(initialTab || (cow?.status === 'calf' ? 'health' : 'milk'));
   useEffect(() => {
+    if (initialTab) { setSub(initialTab); return; }
     if (cow?.status === 'calf' && (sub === 'milk' || sub === 'calves')) setSub('health');
-  }, [cow?.id, cow?.status]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cow?.id, cow?.status, initialTab]); // eslint-disable-line react-hooks/exhaustive-deps
   const [confirmDel, setConfirmDel] = useState(false);
   const [viewingMed, setViewingMed] = useState(null);
   const [viewingHeat, setViewingHeat] = useState(null);
