@@ -1116,10 +1116,10 @@ export default function App() {
               onEditHeat={onEditHeat}
               onDeleteHeat={onDeleteHeat}
               onAddMedical={() => setModal({ type: 'medical', cowId: openCowId })}
-              onToggleMedComplete={async (record) => {
-                const completed = !record.completed;
+              onToggleMedComplete={async (record, completed) => {
                 const { data: row, error } = await supabase.from('medical_records').update({ completed }).eq('id', record.id).select().single();
-                if (!error && row) setMedical(medical.map((m) => (m.id === record.id ? mapMedFromRow(row) : m)));
+                if (error) throw new Error(error.message);
+                if (row) setMedical(medical.map((m) => (m.id === record.id ? mapMedFromRow(row) : m)));
               }}
               onAddCalf={() => setModal({ type: 'cow', defaultStatus: 'calf', defaultMotherId: openCowId })}
               onOpenCow={setOpenCowId}
@@ -1196,10 +1196,10 @@ export default function App() {
                     if (kind === 'print') setPrintJob({ type: 'list', title: 'Health Records', headers: MED_HEADERS, rows });
                     else downloadFile('health_records.csv', toCSV(MED_HEADERS, rows));
                   }}
-                  onToggleComplete={async (record) => {
-                    const completed = !record.completed;
+                  onToggleComplete={async (record, completed) => {
                     const { data: row, error } = await supabase.from('medical_records').update({ completed }).eq('id', record.id).select().single();
-                    if (!error && row) setMedical(medical.map((m) => (m.id === record.id ? mapMedFromRow(row) : m)));
+                    if (error) throw new Error(error.message);
+                    if (row) setMedical(medical.map((m) => (m.id === record.id ? mapMedFromRow(row) : m)));
                   }}
                 />
               )}
@@ -1902,7 +1902,7 @@ function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus,
           record={viewingMed}
           cow={cow}
           onClose={() => setViewingMed(null)}
-          onToggleComplete={(r) => { onToggleMedComplete(r); setViewingMed({ ...r, completed: !r.completed }); }}
+          onSaveComplete={async (r, completed) => { await onToggleMedComplete(r, completed); setViewingMed({ ...r, completed }); }}
         />
       )}
       {viewingHeat && (
@@ -2287,8 +2287,28 @@ function HeatDetailModal({ record, cow, onClose, onEdit, onDelete }) {
   );
 }
 
-function HealthDetailModal({ record, cow, onClose, onToggleComplete }) {
+function HealthDetailModal({ record, cow, onClose, onSaveComplete }) {
+  const [completed, setCompleted] = useState(!!record?.completed);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
   if (!record) return null;
+
+  const dirty = completed !== !!record.completed;
+
+  const save = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      await onSaveComplete(record, completed);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1600);
+    } catch (e) {
+      setError(e?.message || 'Could not save. Please check your connection and try again.');
+    }
+    setBusy(false);
+  };
+
   return (
     <Modal title="Health Record" onClose={onClose}>
       {cow && (
@@ -2309,25 +2329,34 @@ function HealthDetailModal({ record, cow, onClose, onToggleComplete }) {
         {record.nextDueDate && (
           <div>
             <div className="ff-body" style={{ fontSize: 11, fontWeight: 600, color: C.sub, marginBottom: 2 }}>Next follow-up</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div className="ff-body" style={{ fontSize: 13.5, color: C.ink, lineHeight: 1.5 }}>{fmtDate(record.nextDueDate)}</div>
-              {record.completed && <Chip bg={C.greenSoft} fg={C.green}>Completed</Chip>}
-            </div>
+            <div className="ff-body" style={{ fontSize: 13.5, color: C.ink, lineHeight: 1.5 }}>{fmtDate(record.nextDueDate)}</div>
           </div>
         )}
       </div>
       {record.nextDueDate && (
-        <button
-          onClick={() => onToggleComplete(record)}
-          className="ff-body"
-          style={{
-            width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-            background: record.completed ? C.greySoft : C.greenSoft, color: record.completed ? C.ink : C.green,
-            border: 'none', borderRadius: 10, padding: '11px 0', fontSize: 13, fontWeight: 700,
-          }}
-        >
-          <Check size={15} /> {record.completed ? 'Mark as not completed' : 'Mark as completed'}
-        </button>
+        <>
+          <button
+            type="button"
+            onClick={() => setCompleted(!completed)}
+            className="ff-body"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+              border: `1.5px solid ${completed ? C.green : C.line}`, background: completed ? C.greenSoft : '#fff',
+              borderRadius: 10, padding: '11px 12px', marginBottom: 12,
+            }}
+          >
+            <div style={{ width: 20, height: 20, borderRadius: 6, border: `1.5px solid ${completed ? C.green : C.grey}`, background: completed ? C.green : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              {completed && <Check size={13} color="#fff" />}
+            </div>
+            <span style={{ fontSize: 13.5, fontWeight: 600, color: completed ? C.green : C.ink }}>This follow-up is completed</span>
+          </button>
+
+          {error && <div style={{ background: C.rustSoft, color: C.rust, borderRadius: 10, padding: 10, fontSize: 12.5, marginBottom: 12 }}>{error}</div>}
+
+          <PrimaryButton disabled={busy || !dirty} onClick={save}>
+            {busy ? 'Saving…' : saved ? 'Saved ✓' : 'Save'}
+          </PrimaryButton>
+        </>
       )}
     </Modal>
   );
@@ -2391,7 +2420,7 @@ function HealthScreen({ medical, cowById, onAdd, onExport, onToggleComplete }) {
           </div>
         )}
       </div>
-      {viewing && <HealthDetailModal record={viewing} cow={cowById(viewing.cowId)} onClose={() => setViewing(null)} onToggleComplete={(r) => { onToggleComplete(r); setViewing({ ...r, completed: !r.completed }); }} />}
+      {viewing && <HealthDetailModal record={viewing} cow={cowById(viewing.cowId)} onClose={() => setViewing(null)} onSaveComplete={async (r, completed) => { await onToggleComplete(r, completed); setViewing({ ...r, completed }); }} />}
       <FAB onClick={onAdd} label="Add record" />
     </div>
   );
