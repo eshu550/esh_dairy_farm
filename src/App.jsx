@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useContext } from 'react';
 import {
   Home, Milk, HeartPulse, Stethoscope, Plus, ArrowLeft, X,
-  Calendar, Search, Check, ChevronRight, Trash2, Pencil, Droplet, Syringe, Printer, Download, Wheat, Baby, PackageMinus, PackagePlus, Upload, LogOut, Mail, Lock, Users, UserPlus, Eye, KeyRound, UserCircle
+  Calendar, Search, Check, ChevronRight, Trash2, Pencil, Droplet, Syringe, Printer, Download, Wheat, Baby, PackageMinus, PackagePlus, Upload, LogOut, Mail, Lock, Users, UserPlus, Eye, KeyRound, UserCircle, Wallet, TrendingUp, TrendingDown
 } from 'lucide-react';
 import ReactDOM from 'react-dom';
 import { supabase, configMissing } from './supabaseClient.js';
@@ -367,6 +367,8 @@ const mapMedFromRow = (r) => ({ id: r.id, cowId: r.cow_id, date: r.date, type: r
 const medToRow = (m, userId) => ({ user_id: userId, cow_id: m.cowId, date: m.date, type: m.type, medicine: m.medicine || null, description: m.description || null, vet: m.vet || null, next_due_date: m.nextDueDate || null, completed: !!m.completed });
 const mapFeedTypeFromRow = (r) => ({ id: r.id, name: r.name, costPerBag: r.cost_per_bag });
 const feedTypeToRow = (f, userId) => ({ user_id: userId, name: f.name, cost_per_bag: f.costPerBag });
+const mapFinanceFromRow = (r) => ({ id: r.id, date: r.date, type: r.type, category: r.category, amount: r.amount, notes: r.notes || '' });
+const financeToRow = (f, userId) => ({ user_id: userId, date: f.date, type: f.type, category: f.category, amount: f.amount, notes: f.notes || null });
 const mapFeedTxnFromRow = (r) => ({ id: r.id, feedTypeId: r.feed_type_id, date: r.date, kind: r.kind, bags: r.bags, cost: r.cost, notes: r.notes || '' });
 const feedTxnToRow = (t, userId) => ({ user_id: userId, feed_type_id: t.feedTypeId, date: t.date, kind: t.kind, bags: t.bags, cost: t.cost ?? null, notes: t.notes || null });
 
@@ -837,6 +839,7 @@ export default function App() {
   const [medical, setMedical] = useState([]);
   const [feedTypes, setFeedTypes] = useState([]);
   const [feedTransactions, setFeedTransactions] = useState([]);
+  const [financeEntries, setFinanceEntries] = useState([]);
   const [tab, setTab] = useState('home');
   const [openCowId, setOpenCowId] = useState(null);
   const [openCowTab, setOpenCowTab] = useState(null);
@@ -977,15 +980,16 @@ export default function App() {
 
   const loadAllData = async () => {
     try {
-      const [c, m, h, med, ft, tx] = await Promise.all([
+      const [c, m, h, med, ft, tx, fin] = await Promise.all([
         fetchTable('cows', mapCowFromRow),
         fetchTable('milk_records', mapMilkFromRow, 'date'),
         fetchTable('heat_records', mapHeatFromRow, 'date'),
         fetchTable('medical_records', mapMedFromRow, 'date'),
         fetchTable('feed_types', mapFeedTypeFromRow),
         fetchTable('feed_transactions', mapFeedTxnFromRow, 'date'),
+        fetchTable('finance_entries', mapFinanceFromRow, 'date'),
       ]);
-      setCows(c); setMilk(m); setHeat(h); setMedical(med); setFeedTypes(ft); setFeedTransactions(tx);
+      setCows(c); setMilk(m); setHeat(h); setMedical(med); setFeedTypes(ft); setFeedTransactions(tx); setFinanceEntries(fin);
     } catch (e) {
       console.error('Failed to load data', e);
     }
@@ -997,7 +1001,7 @@ export default function App() {
       setLoaded(false);
       resolveAccess(session).then(loadAllData);
     } else if (session === null) {
-      setCows([]); setMilk([]); setHeat([]); setMedical([]); setFeedTypes([]); setFeedTransactions([]); setLoaded(true);
+      setCows([]); setMilk([]); setHeat([]); setMedical([]); setFeedTypes([]); setFeedTransactions([]); setFinanceEntries([]); setLoaded(true);
     }
   }, [session]);
 
@@ -1248,6 +1252,26 @@ export default function App() {
                   }}
                 />
               )}
+              {tab === 'finance' && (
+                <FinanceScreen
+                  financeEntries={financeEntries}
+                  feedTransactions={feedTransactions}
+                  onAdd={(type) => setModal({ type: 'finance', entryType: type })}
+                  onEdit={(id) => setModal({ type: 'finance', editId: id })}
+                  onDelete={async (id) => {
+                    await supabase.from('finance_entries').delete().eq('id', id);
+                    setFinanceEntries(financeEntries.filter((e) => e.id !== id));
+                  }}
+                  onExport={(kind) => {
+                    const feedRows = feedTransactions.filter((t) => t.kind === 'purchase').map((t) => [fmtDate(t.date), 'Expense', 'Feed', t.cost || 0, 'Auto-pulled from Feed tab']);
+                    const manualRows = financeEntries.map((e) => [fmtDate(e.date), e.type === 'income' ? 'Income' : 'Expense', e.category, e.amount, e.notes || '']);
+                    const rows = [...feedRows, ...manualRows].sort((a, b) => a[0].localeCompare(b[0]));
+                    const headers = ['Date', 'Type', 'Category', 'Amount (₹)', 'Notes'];
+                    if (kind === 'print') setPrintJob({ type: 'list', title: 'Finance Report', headers, rows });
+                    else downloadFile('finance_records.csv', toCSV(headers, rows));
+                  }}
+                />
+              )}
             </div>
           )}
           </div>
@@ -1375,6 +1399,24 @@ export default function App() {
             />
           )}
 
+          {modal && modal.type === 'finance' && (
+            <FinanceEntryForm
+              initial={modal.editId ? financeEntries.find((e) => e.id === modal.editId) : null}
+              defaultType={modal.entryType}
+              onClose={() => setModal(null)}
+              onSave={async (data) => {
+                if (modal.editId) {
+                  await supabase.from('finance_entries').update(financeToRow(data, userId)).eq('id', modal.editId);
+                  setFinanceEntries(financeEntries.map((e) => (e.id === modal.editId ? { ...e, ...data } : e)));
+                } else {
+                  const { data: row, error } = await supabase.from('finance_entries').insert(financeToRow(data, userId)).select().single();
+                  if (!error && row) setFinanceEntries([...financeEntries, mapFinanceFromRow(row)]);
+                }
+                setModal(null);
+              }}
+            />
+          )}
+
           {modal && modal.type === 'manageAccess' && (
             <ManageAccessModal ownerId={session.user.id} onClose={() => setModal(null)} />
           )}
@@ -1437,9 +1479,10 @@ function BottomNav({ tab, setTab }) {
     { key: 'heat', label: 'Heat', icon: HeartPulse },
     { key: 'health', label: 'Health', icon: Stethoscope },
     { key: 'feed', label: 'Feed', icon: Wheat },
+    { key: 'finance', label: 'Finance', icon: Wallet },
   ];
   return (
-    <div style={{ flexShrink: 0, background: '#fff', borderTop: `1px solid ${C.line}`, display: 'flex', padding: '8px 4px', paddingBottom: 'max(10px, calc(env(safe-area-inset-bottom) + 6px))', zIndex: 30 }}>
+    <div style={{ flexShrink: 0, background: '#fff', borderTop: `1px solid ${C.line}`, display: 'flex', padding: '7px 2px', paddingBottom: 'max(9px, calc(env(safe-area-inset-bottom) + 5px))', zIndex: 30 }}>
       {items.map(({ key, label, icon: Icon }) => {
         const active = tab === key;
         return (
@@ -1447,10 +1490,10 @@ function BottomNav({ tab, setTab }) {
             key={key}
             onClick={() => setTab(key)}
             className="ff-body"
-            style={{ flex: 1, background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, color: active ? C.green : C.grey, padding: '4px 0', minHeight: 44 }}
+            style={{ flex: 1, background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, color: active ? C.green : C.grey, padding: '3px 0', minHeight: 40 }}
           >
-            <Icon size={20} strokeWidth={active ? 2.4 : 2} />
-            <span style={{ fontSize: 10.5, fontWeight: active ? 700 : 500 }}>{label}</span>
+            <Icon size={18} strokeWidth={active ? 2.4 : 2} />
+            <span style={{ fontSize: 9.5, fontWeight: active ? 700 : 500 }}>{label}</span>
           </button>
         );
       })}
@@ -3048,6 +3091,169 @@ function FeedTxnDetailModal({ record, feedType, onClose, onUpdate, onDelete }) {
           )}
         </>
       )}
+    </Modal>
+  );
+}
+
+// ================= FINANCE =================
+const INCOME_CATEGORIES = ['Milk Sale', 'Animal Sale', 'Other'];
+const EXPENSE_CATEGORIES = ['Medical', 'Other'];
+
+function FinanceScreen({ financeEntries, feedTransactions, onAdd, onEdit, onDelete, onExport }) {
+  const { isReadOnly } = useContext(RoleContext);
+  const [viewing, setViewing] = useState(null);
+  const [confirmDelId, setConfirmDelId] = useState(null);
+  const month = currentMonthStr();
+
+  const feedExpenseRows = useMemo(() => (
+    feedTransactions
+      .filter((t) => t.kind === 'purchase')
+      .map((t) => ({ id: `feed-${t.id}`, date: t.date, type: 'expense', category: 'Feed', amount: Number(t.cost || 0), notes: '', isFeed: true }))
+  ), [feedTransactions]);
+
+  const allExpenses = useMemo(() => (
+    [...feedExpenseRows, ...financeEntries.filter((e) => e.type === 'expense')]
+  ), [feedExpenseRows, financeEntries]);
+
+  const allIncome = useMemo(() => financeEntries.filter((e) => e.type === 'income'), [financeEntries]);
+
+  const inMonth = (d) => d.date && d.date.slice(0, 7) === month;
+  const incomeThisMonth = allIncome.filter(inMonth).reduce((s, e) => s + Number(e.amount), 0);
+  const expenseThisMonth = allExpenses.filter(inMonth).reduce((s, e) => s + Number(e.amount), 0);
+  const netThisMonth = incomeThisMonth - expenseThisMonth;
+
+  const feedThisMonth = feedExpenseRows.filter(inMonth).reduce((s, e) => s + e.amount, 0);
+  const medicalThisMonth = financeEntries.filter((e) => e.type === 'expense' && e.category === 'Medical' && inMonth(e)).reduce((s, e) => s + Number(e.amount), 0);
+  const otherExpThisMonth = financeEntries.filter((e) => e.type === 'expense' && e.category === 'Other' && inMonth(e)).reduce((s, e) => s + Number(e.amount), 0);
+
+  const recentAll = useMemo(() => (
+    [...allIncome, ...allExpenses].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 12)
+  ), [allIncome, allExpenses]);
+
+  return (
+    <div>
+      <ScreenHeader
+        title="Finance" subtitle={monthLabel(month)}
+        right={
+          <div style={{ display: 'flex', gap: 6 }}>
+            <HeaderIconButton title="Print finance report" icon={<Printer size={15} color="#fff" />} onClick={() => onExport('print')} />
+            <HeaderIconButton title="Download CSV" icon={<Download size={15} color="#fff" />} onClick={() => onExport('csv')} />
+          </div>
+        }
+      />
+      <div style={{ padding: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+          <StatCard label="Income this mo." value={`₹${incomeThisMonth.toFixed(0)}`} bg={C.greenSoft} fg={C.green} icon={<TrendingUp size={16} />} />
+          <StatCard label="Expenses this mo." value={`₹${expenseThisMonth.toFixed(0)}`} bg={C.rustSoft} fg={C.rust} icon={<TrendingDown size={16} />} />
+        </div>
+        <div style={{ background: netThisMonth >= 0 ? C.greenSoft : C.rustSoft, borderRadius: 14, padding: 14, marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <div className="ff-body" style={{ fontSize: 11.5, color: netThisMonth >= 0 ? C.green : C.rust, fontWeight: 600 }}>Net {netThisMonth >= 0 ? 'profit' : 'loss'} this month</div>
+            <div className="ff-display" style={{ fontSize: 24, fontWeight: 700, color: netThisMonth >= 0 ? C.green : C.rust }}>₹{Math.abs(netThisMonth).toFixed(0)}</div>
+          </div>
+          <Wallet size={26} color={netThisMonth >= 0 ? C.green : C.rust} />
+        </div>
+
+        <SectionTitle title="Expense breakdown (this month)" />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 18 }}>
+          <div style={{ background: '#fff', border: `1px solid ${C.line}`, borderRadius: 12, padding: '10px 8px', textAlign: 'center' }}>
+            <div style={{ fontSize: 10, color: C.sub, fontWeight: 600 }}>Feed</div>
+            <div className="ff-display" style={{ fontSize: 15, fontWeight: 700, color: C.ink }}>₹{feedThisMonth.toFixed(0)}</div>
+          </div>
+          <div style={{ background: '#fff', border: `1px solid ${C.line}`, borderRadius: 12, padding: '10px 8px', textAlign: 'center' }}>
+            <div style={{ fontSize: 10, color: C.sub, fontWeight: 600 }}>Medical</div>
+            <div className="ff-display" style={{ fontSize: 15, fontWeight: 700, color: C.ink }}>₹{medicalThisMonth.toFixed(0)}</div>
+          </div>
+          <div style={{ background: '#fff', border: `1px solid ${C.line}`, borderRadius: 12, padding: '10px 8px', textAlign: 'center' }}>
+            <div style={{ fontSize: 10, color: C.sub, fontWeight: 600 }}>Other</div>
+            <div className="ff-display" style={{ fontSize: 15, fontWeight: 700, color: C.ink }}>₹{otherExpThisMonth.toFixed(0)}</div>
+          </div>
+        </div>
+
+        {!isReadOnly && (
+          <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
+            <button onClick={() => onAdd('income')} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.greenSoft, color: C.green, border: 'none', borderRadius: 12, padding: '11px 0', fontWeight: 700, fontSize: 13 }}>
+              <Plus size={15} /> Add income
+            </button>
+            <button onClick={() => onAdd('expense')} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.rustSoft, color: C.rust, border: 'none', borderRadius: 12, padding: '11px 0', fontWeight: 700, fontSize: 13 }}>
+              <Plus size={15} /> Add expense
+            </button>
+          </div>
+        )}
+
+        <SectionTitle title="Recent entries" />
+        {recentAll.length === 0 ? (
+          <EmptyState icon={<Wallet size={30} />} title="No entries yet" subtitle="Log your milk sales and other income, plus medical and other expenses. Feed costs are pulled in automatically from the Feed tab." />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {recentAll.map((e) => (
+              <div key={e.id} onClick={() => !e.isFeed && setViewing(e)} style={rowCardStyle}>
+                <div style={{ color: e.type === 'income' ? C.green : C.rust }}>
+                  {e.type === 'income' ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
+                </div>
+                <div style={{ flex: 1, marginLeft: 10 }}>
+                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{e.category}{e.isFeed ? ' (from Feed tab)' : ''}</div>
+                  <div style={{ fontSize: 11.5, color: C.sub }}>{fmtDate(e.date)}{e.notes ? ` · ${e.notes}` : ''}</div>
+                </div>
+                <div className="ff-display" style={{ fontWeight: 700, fontSize: 15, color: e.type === 'income' ? C.green : C.rust }}>
+                  {e.type === 'income' ? '+' : '−'}₹{Number(e.amount).toFixed(0)}
+                </div>
+                {!e.isFeed && <ChevronRight size={16} color={C.grey} style={{ marginLeft: 4 }} />}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {viewing && (
+        <Modal title={viewing.type === 'income' ? 'Income Entry' : 'Expense Entry'} onClose={() => setViewing(null)}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 18 }}>
+            <DetailRow label="Date" value={fmtDate(viewing.date)} />
+            <DetailRow label="Category" value={viewing.category} />
+            <DetailRow label="Amount" value={`₹${Number(viewing.amount).toFixed(0)}`} />
+            {viewing.notes && <DetailRow label="Notes" value={viewing.notes} />}
+          </div>
+          {!isReadOnly && (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => { onEdit(viewing.id); setViewing(null); }} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.greenSoft, color: C.green, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 13, fontWeight: 700 }}>
+                <Pencil size={14} /> Edit
+              </button>
+              <button onClick={() => { setConfirmDelId(viewing.id); setViewing(null); }} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.rustSoft, color: C.rust, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 13, fontWeight: 700 }}>
+                <Trash2 size={14} /> Delete
+              </button>
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {confirmDelId && (
+        <Modal title="Delete this entry?" onClose={() => setConfirmDelId(null)}>
+          <div style={{ fontSize: 13, color: C.sub, marginBottom: 14 }}>This can't be undone.</div>
+          <PrimaryButton danger onClick={() => { onDelete(confirmDelId); setConfirmDelId(null); }}>Delete permanently</PrimaryButton>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function FinanceEntryForm({ initial, defaultType, onClose, onSave }) {
+  const type = initial?.type || defaultType || 'income';
+  const categories = type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+  const [date, setDate] = useState(initial?.date || todayStr());
+  const [category, setCategory] = useState(initial?.category || categories[0]);
+  const [amount, setAmount] = useState(initial?.amount ?? '');
+  const [notes, setNotes] = useState(initial?.notes || '');
+  const valid = date && amount !== '' && Number(amount) > 0;
+
+  return (
+    <Modal title={initial ? 'Edit Entry' : type === 'income' ? 'Add Income' : 'Add Expense'} onClose={onClose}>
+      <Field label="Date"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} max={todayStr()} /></Field>
+      <Field label="Category"><Segmented options={categories} value={category} onChange={setCategory} /></Field>
+      <Field label="Amount (₹)"><input type="number" min={0} value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="e.g. 5000" style={inputStyle} /></Field>
+      <Field label="Notes (optional)"><input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. sold to co-op" style={inputStyle} /></Field>
+      <PrimaryButton disabled={!valid} onClick={() => onSave({ date, type, category, amount: Number(amount), notes: notes.trim() })}>
+        {initial ? 'Save changes' : type === 'income' ? 'Add income' : 'Add expense'}
+      </PrimaryButton>
     </Modal>
   );
 }
