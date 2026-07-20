@@ -1256,6 +1256,7 @@ export default function App() {
                 <FinanceScreen
                   financeEntries={financeEntries}
                   feedTransactions={feedTransactions}
+                  feedTypes={feedTypes}
                   onAdd={(type) => setModal({ type: 'finance', entryType: type })}
                   onEdit={(id) => setModal({ type: 'finance', editId: id })}
                   onDelete={async (id) => {
@@ -1263,7 +1264,11 @@ export default function App() {
                     setFinanceEntries(financeEntries.filter((e) => e.id !== id));
                   }}
                   onExport={(kind) => {
-                    const feedRows = feedTransactions.filter((t) => t.kind === 'purchase').map((t) => [fmtDate(t.date), 'Expense', 'Feed', t.cost || 0, 'Auto-pulled from Feed tab']);
+                    const feedRows = feedTransactions.filter((t) => t.kind === 'usage').map((t) => {
+                      const ft = feedTypes.find((f) => f.id === t.feedTypeId);
+                      const amount = ft ? Number(t.bags) * Number(ft.costPerBag) : 0;
+                      return [fmtDate(t.date), 'Expense', 'Feed', amount, ft ? `${t.bags} bags of ${ft.name} used` : `${t.bags} bags used`];
+                    });
                     const manualRows = financeEntries.map((e) => [fmtDate(e.date), e.type === 'income' ? 'Income' : 'Expense', e.category, e.amount, e.notes || '']);
                     const rows = [...feedRows, ...manualRows].sort((a, b) => a[0].localeCompare(b[0]));
                     const headers = ['Date', 'Type', 'Category', 'Amount (₹)', 'Notes'];
@@ -3099,7 +3104,7 @@ function FeedTxnDetailModal({ record, feedType, onClose, onUpdate, onDelete }) {
 const INCOME_CATEGORIES = ['Milk Sale', 'Animal Sale', 'Other'];
 const EXPENSE_CATEGORIES = ['Medical', 'Other'];
 
-function FinanceScreen({ financeEntries, feedTransactions, onAdd, onEdit, onDelete, onExport }) {
+function FinanceScreen({ financeEntries, feedTransactions, feedTypes, onAdd, onEdit, onDelete, onExport }) {
   const { isReadOnly } = useContext(RoleContext);
   const [viewing, setViewing] = useState(null);
   const [confirmDelId, setConfirmDelId] = useState(null);
@@ -3107,9 +3112,16 @@ function FinanceScreen({ financeEntries, feedTransactions, onAdd, onEdit, onDele
 
   const feedExpenseRows = useMemo(() => (
     feedTransactions
-      .filter((t) => t.kind === 'purchase')
-      .map((t) => ({ id: `feed-${t.id}`, date: t.date, type: 'expense', category: 'Feed', amount: Number(t.cost || 0), notes: '', isFeed: true }))
-  ), [feedTransactions]);
+      .filter((t) => t.kind === 'usage')
+      .map((t) => {
+        const ft = feedTypes.find((f) => f.id === t.feedTypeId);
+        const amount = ft ? Number(t.bags) * Number(ft.costPerBag) : 0;
+        return {
+          id: `feed-${t.id}`, date: t.date, type: 'expense', category: 'Feed',
+          amount, notes: ft ? `${t.bags} bags of ${ft.name} used` : `${t.bags} bags used`, isFeed: true,
+        };
+      })
+  ), [feedTransactions, feedTypes]);
 
   const allExpenses = useMemo(() => (
     [...feedExpenseRows, ...financeEntries.filter((e) => e.type === 'expense')]
