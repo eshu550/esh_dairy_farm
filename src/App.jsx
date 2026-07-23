@@ -108,6 +108,19 @@ function feedStockValue(feedType, txns) {
   return feedStock(feedType.id, txns) * Number(feedType.costPerBag || 0);
 }
 
+function medicineStock(medicineTypeId, txns) {
+  return txns.filter((t) => t.medicineTypeId === medicineTypeId).reduce((s, t) => s + (t.kind === 'purchase' ? Number(t.quantity) : -Number(t.quantity)), 0);
+}
+function medicineTotalPurchased(medicineTypeId, txns) {
+  return txns.filter((t) => t.medicineTypeId === medicineTypeId && t.kind === 'purchase').reduce((s, t) => s + Number(t.quantity), 0);
+}
+function medicineTotalUsed(medicineTypeId, txns) {
+  return txns.filter((t) => t.medicineTypeId === medicineTypeId && t.kind === 'usage').reduce((s, t) => s + Number(t.quantity), 0);
+}
+function medicineMonthPurchased(medicineTypeId, txns, month) {
+  return txns.filter((t) => t.medicineTypeId === medicineTypeId && t.kind === 'purchase' && t.date.slice(0, 7) === month).reduce((s, t) => s + Number(t.quantity), 0);
+}
+
 // ---------- Insurance helper (cow-level: insured?, start/expiry, 1-month alert) ----------
 function insuranceStatusFor(cow) {
   if (!cow.insured || !cow.insuranceExpiryDate) return { status: 'none' };
@@ -369,6 +382,10 @@ const mapFeedTypeFromRow = (r) => ({ id: r.id, name: r.name, costPerBag: r.cost_
 const feedTypeToRow = (f, userId) => ({ user_id: userId, name: f.name, cost_per_bag: f.costPerBag });
 const mapFinanceFromRow = (r) => ({ id: r.id, date: r.date, type: r.type, category: r.category, amount: r.amount, notes: r.notes || '' });
 const financeToRow = (f, userId) => ({ user_id: userId, date: f.date, type: f.type, category: f.category, amount: f.amount, notes: f.notes || null });
+const mapMedicineTypeFromRow = (r) => ({ id: r.id, name: r.name, unit: r.unit || 'units', costPerUnit: r.cost_per_unit ?? '', lowStockThreshold: r.low_stock_threshold ?? 5 });
+const medicineTypeToRow = (m, userId) => ({ user_id: userId, name: m.name, unit: m.unit || 'units', cost_per_unit: m.costPerUnit === '' ? null : m.costPerUnit, low_stock_threshold: m.lowStockThreshold === '' ? null : m.lowStockThreshold });
+const mapMedicineTxnFromRow = (r) => ({ id: r.id, medicineTypeId: r.medicine_type_id, date: r.date, kind: r.kind, quantity: r.quantity, cost: r.cost, notes: r.notes || '' });
+const medicineTxnToRow = (t, userId) => ({ user_id: userId, medicine_type_id: t.medicineTypeId, date: t.date, kind: t.kind, quantity: t.quantity, cost: t.cost ?? null, notes: t.notes || null });
 const mapFeedTxnFromRow = (r) => ({ id: r.id, feedTypeId: r.feed_type_id, date: r.date, kind: r.kind, bags: r.bags, cost: r.cost, notes: r.notes || '' });
 const feedTxnToRow = (t, userId) => ({ user_id: userId, feed_type_id: t.feedTypeId, date: t.date, kind: t.kind, bags: t.bags, cost: t.cost ?? null, notes: t.notes || null });
 
@@ -840,6 +857,8 @@ export default function App() {
   const [feedTypes, setFeedTypes] = useState([]);
   const [feedTransactions, setFeedTransactions] = useState([]);
   const [financeEntries, setFinanceEntries] = useState([]);
+  const [medicineTypes, setMedicineTypes] = useState([]);
+  const [medicineTransactions, setMedicineTransactions] = useState([]);
   const [tab, setTab] = useState('home');
   const [openCowId, setOpenCowId] = useState(null);
   const [openCowTab, setOpenCowTab] = useState(null);
@@ -980,7 +999,7 @@ export default function App() {
 
   const loadAllData = async () => {
     try {
-      const [c, m, h, med, ft, tx, fin] = await Promise.all([
+      const [c, m, h, med, ft, tx, fin, mt, mtx] = await Promise.all([
         fetchTable('cows', mapCowFromRow),
         fetchTable('milk_records', mapMilkFromRow, 'date'),
         fetchTable('heat_records', mapHeatFromRow, 'date'),
@@ -988,8 +1007,11 @@ export default function App() {
         fetchTable('feed_types', mapFeedTypeFromRow),
         fetchTable('feed_transactions', mapFeedTxnFromRow, 'date'),
         fetchTable('finance_entries', mapFinanceFromRow, 'date'),
+        fetchTable('medicine_types', mapMedicineTypeFromRow),
+        fetchTable('medicine_transactions', mapMedicineTxnFromRow, 'date'),
       ]);
       setCows(c); setMilk(m); setHeat(h); setMedical(med); setFeedTypes(ft); setFeedTransactions(tx); setFinanceEntries(fin);
+      setMedicineTypes(mt); setMedicineTransactions(mtx);
     } catch (e) {
       console.error('Failed to load data', e);
     }
@@ -1001,7 +1023,7 @@ export default function App() {
       setLoaded(false);
       resolveAccess(session).then(loadAllData);
     } else if (session === null) {
-      setCows([]); setMilk([]); setHeat([]); setMedical([]); setFeedTypes([]); setFeedTransactions([]); setFinanceEntries([]); setLoaded(true);
+      setCows([]); setMilk([]); setHeat([]); setMedical([]); setFeedTypes([]); setFeedTransactions([]); setFinanceEntries([]); setMedicineTypes([]); setMedicineTransactions([]); setLoaded(true);
     }
   }, [session]);
 
@@ -1208,6 +1230,43 @@ export default function App() {
                     if (error) throw new Error(error.message);
                     if (row) setMedical(medical.map((m) => (m.id === record.id ? mapMedFromRow(row) : m)));
                   }}
+                  medicineTypes={medicineTypes}
+                  medicineTransactions={medicineTransactions}
+                  onAddMedicineType={() => setModal({ type: 'medicineType' })}
+                  onEditMedicineType={(id) => setModal({ type: 'medicineType', editId: id })}
+                  onDeleteMedicineType={async (id) => {
+                    await supabase.from('medicine_types').delete().eq('id', id);
+                    setMedicineTypes(medicineTypes.filter((m) => m.id !== id));
+                    setMedicineTransactions(medicineTransactions.filter((t) => t.medicineTypeId !== id));
+                  }}
+                  onLogMedicineTxn={(medicineTypeId, kind) => setModal({ type: 'medicineTxn', medicineTypeId, kind })}
+                  onUpdateMedicineTxn={async (id, data) => {
+                    const patch = {};
+                    if (data.quantity != null) patch.quantity = data.quantity;
+                    if ('cost' in data) patch.cost = data.cost;
+                    const { data: row, error } = await supabase.from('medicine_transactions').update(patch).eq('id', id).select().single();
+                    if (!error && row) setMedicineTransactions(medicineTransactions.map((t) => (t.id === id ? mapMedicineTxnFromRow(row) : t)));
+                  }}
+                  onDeleteMedicineTxn={async (id) => {
+                    await supabase.from('medicine_transactions').delete().eq('id', id);
+                    setMedicineTransactions(medicineTransactions.filter((t) => t.id !== id));
+                  }}
+                  onExportMedicine={(kind) => {
+                    const headers = ['Medicine', 'Unit', 'Cost/Unit (₹)', 'Stock Left', 'Purchased (Total)', 'Used (Total)'];
+                    const rows = medicineTypes.map((mt) => [
+                      mt.name, mt.unit, mt.costPerUnit || '',
+                      medicineStock(mt.id, medicineTransactions),
+                      medicineTotalPurchased(mt.id, medicineTransactions),
+                      medicineTotalUsed(mt.id, medicineTransactions),
+                    ]);
+                    const txnHeaders = ['Date', 'Medicine', 'Transaction', 'Quantity', 'Cost (₹)', 'Notes'];
+                    const txnRows = medicineTransactions.slice().sort((a, b) => a.date.localeCompare(b.date)).map((t) => {
+                      const mt = medicineTypes.find((m) => m.id === t.medicineTypeId);
+                      return [fmtDate(t.date), mt ? mt.name : 'Unknown', t.kind === 'purchase' ? 'Purchased' : 'Used', t.quantity, t.kind === 'purchase' ? (t.cost || '') : '', t.notes || ''];
+                    });
+                    if (kind === 'print') setPrintJob({ type: 'feed', title: 'Medicine Stock Report', summaryHeaders: headers, summaryRows: rows, txnHeaders, txnRows });
+                    else downloadFile('medicine_stock.csv', ['SUMMARY', toCSV(headers, rows), '', 'TRANSACTIONS', toCSV(txnHeaders, txnRows)].join('\n'));
+                  }}
                 />
               )}
               {tab === 'feed' && (
@@ -1257,6 +1316,8 @@ export default function App() {
                   financeEntries={financeEntries}
                   feedTransactions={feedTransactions}
                   feedTypes={feedTypes}
+                  medicineTransactions={medicineTransactions}
+                  medicineTypes={medicineTypes}
                   onAdd={(type) => setModal({ type: 'finance', entryType: type })}
                   onEdit={(id) => setModal({ type: 'finance', editId: id })}
                   onDelete={async (id) => {
@@ -1417,6 +1478,36 @@ export default function App() {
                   const { data: row, error } = await supabase.from('finance_entries').insert(financeToRow(data, userId)).select().single();
                   if (!error && row) setFinanceEntries([...financeEntries, mapFinanceFromRow(row)]);
                 }
+                setModal(null);
+              }}
+            />
+          )}
+
+          {modal && modal.type === 'medicineType' && (
+            <MedicineTypeForm
+              initial={modal.editId ? medicineTypes.find((m) => m.id === modal.editId) : null}
+              onClose={() => setModal(null)}
+              onSave={async (data) => {
+                if (modal.editId) {
+                  await supabase.from('medicine_types').update(medicineTypeToRow(data, userId)).eq('id', modal.editId);
+                  setMedicineTypes(medicineTypes.map((m) => (m.id === modal.editId ? { ...m, ...data } : m)));
+                } else {
+                  const { data: row, error } = await supabase.from('medicine_types').insert(medicineTypeToRow(data, userId)).select().single();
+                  if (!error && row) setMedicineTypes([...medicineTypes, mapMedicineTypeFromRow(row)]);
+                }
+                setModal(null);
+              }}
+            />
+          )}
+
+          {modal && modal.type === 'medicineTxn' && (
+            <MedicineTxnForm
+              medicineType={medicineTypes.find((m) => m.id === modal.medicineTypeId)}
+              kind={modal.kind}
+              onClose={() => setModal(null)}
+              onSave={async (data) => {
+                const { data: row, error } = await supabase.from('medicine_transactions').insert(medicineTxnToRow({ ...data, medicineTypeId: modal.medicineTypeId, kind: modal.kind }, userId)).select().single();
+                if (!error && row) setMedicineTransactions([...medicineTransactions, mapMedicineTxnFromRow(row)]);
                 setModal(null);
               }}
             />
@@ -2423,9 +2514,27 @@ function DetailRow({ label, value }) {
   );
 }
 
-function HealthScreen({ medical, cowById, onAdd, onExport, onToggleComplete }) {
+function HealthScreen({
+  medical, cowById, onAdd, onExport, onToggleComplete,
+  medicineTypes, medicineTransactions, onAddMedicineType, onEditMedicineType, onDeleteMedicineType,
+  onLogMedicineTxn, onUpdateMedicineTxn, onDeleteMedicineTxn, onExportMedicine,
+}) {
+  const [view, setView] = useState('records'); // 'records' | 'stock'
   const rows = medical.slice().sort((a, b) => b.date.localeCompare(a.date));
   const [viewing, setViewing] = useState(null);
+
+  if (view === 'stock') {
+    return (
+      <MedicineStockView
+        medicineTypes={medicineTypes} medicineTransactions={medicineTransactions}
+        onBackToRecords={() => setView('records')}
+        onAddType={onAddMedicineType} onEditType={onEditMedicineType} onDeleteType={onDeleteMedicineType}
+        onLogTxn={onLogMedicineTxn} onUpdateTxn={onUpdateMedicineTxn} onDeleteTxn={onDeleteMedicineTxn}
+        onExport={onExportMedicine}
+      />
+    );
+  }
+
   return (
     <div>
       <ScreenHeader
@@ -2438,6 +2547,9 @@ function HealthScreen({ medical, cowById, onAdd, onExport, onToggleComplete }) {
         }
       />
       <div style={{ padding: 16 }}>
+        <div style={{ marginBottom: 14 }}>
+          <Segmented options={['Records', 'Medicine Stock']} value="Records" onChange={(v) => setView(v === 'Records' ? 'records' : 'stock')} />
+        </div>
         {rows.length === 0 ? (
           <EmptyState icon={<Stethoscope size={30} />} title="No health records" subtitle="Log vaccinations, treatments, and checkups to keep every cow's history in one place." />
         ) : (
@@ -2474,6 +2586,132 @@ function HealthScreen({ medical, cowById, onAdd, onExport, onToggleComplete }) {
       </div>
       {viewing && <HealthDetailModal record={viewing} cow={cowById(viewing.cowId)} onClose={() => setViewing(null)} onSaveComplete={async (r, completed) => { await onToggleComplete(r, completed); setViewing({ ...r, completed }); }} />}
       <FAB onClick={onAdd} label="Add record" />
+    </div>
+  );
+}
+
+function MedicineStockView({ medicineTypes, medicineTransactions, onBackToRecords, onAddType, onEditType, onDeleteType, onLogTxn, onUpdateTxn, onDeleteTxn, onExport }) {
+  const { isReadOnly } = useContext(RoleContext);
+  const [viewingTxn, setViewingTxn] = useState(null);
+  const month = currentMonthStr();
+  const recent = medicineTransactions.slice().sort((a, b) => b.date.localeCompare(a.date)).slice(0, 8);
+
+  return (
+    <div>
+      <ScreenHeader
+        title="Medicine Stock" subtitle={monthLabel(month)}
+        onBack={onBackToRecords}
+        right={
+          <div style={{ display: 'flex', gap: 6 }}>
+            <HeaderIconButton title="Print medicine report" icon={<Printer size={15} color="#fff" />} onClick={() => onExport('print')} />
+            <HeaderIconButton title="Download CSV" icon={<Download size={15} color="#fff" />} onClick={() => onExport('csv')} />
+          </div>
+        }
+      />
+      <div style={{ padding: 16 }}>
+        <div style={{ marginBottom: 14 }}>
+          <Segmented options={['Records', 'Medicine Stock']} value="Medicine Stock" onChange={(v) => v === 'Records' && onBackToRecords()} />
+        </div>
+
+        <SectionTitle title="Medicines" />
+        {medicineTypes.length === 0 ? (
+          <EmptyState icon={<Syringe size={30} />} title="No medicines added yet" subtitle="Add each medicine you keep on hand to start tracking stock levels and running-low alerts." />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 18 }}>
+            {medicineTypes.map((mt) => {
+              const stock = medicineStock(mt.id, medicineTransactions);
+              const purchasedAll = medicineTotalPurchased(mt.id, medicineTransactions);
+              const usedAll = medicineTotalUsed(mt.id, medicineTransactions);
+              const boughtThisMonth = medicineMonthPurchased(mt.id, medicineTransactions, month);
+              const outOfStock = stock <= 0;
+              const low = !outOfStock && stock <= Number(mt.lowStockThreshold || 5);
+              return (
+                <div key={mt.id} style={{ background: '#fff', border: `1px solid ${C.line}`, borderRadius: 14, padding: 14 }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+                    <div>
+                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 14.5, color: C.ink }}>{mt.name}</div>
+                      <div style={{ fontSize: 11.5, color: C.sub, marginTop: 1 }}>{mt.costPerUnit ? `₹${mt.costPerUnit} / ${mt.unit}` : mt.unit}</div>
+                    </div>
+                    {!isReadOnly && (
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button onClick={() => onEditType(mt.id)} style={{ background: C.greySoft, border: 'none', borderRadius: 8, padding: 5 }}><Pencil size={13} color={C.ink} /></button>
+                        <button onClick={() => onDeleteType(mt.id)} style={{ background: C.greySoft, border: 'none', borderRadius: 8, padding: 5 }}><Trash2 size={13} color={C.ink} /></button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, margin: '12px 0' }}>
+                    <div>
+                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 17, color: outOfStock ? C.rust : low ? C.amber : C.ink }}>{stock}</div>
+                      <div style={{ fontSize: 10.5, color: C.sub }}>{mt.unit} left</div>
+                    </div>
+                    <div>
+                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 15, color: C.ink }}>{purchasedAll}</div>
+                      <div style={{ fontSize: 10.5, color: C.sub }}>Purchased</div>
+                    </div>
+                    <div>
+                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 15, color: C.ink }}>{usedAll}</div>
+                      <div style={{ fontSize: 10.5, color: C.sub }}>Used</div>
+                    </div>
+                  </div>
+
+                  {outOfStock ? (
+                    <div style={{ marginBottom: 10 }}><Chip bg={C.rustSoft} fg={C.rust}>Out of stock</Chip></div>
+                  ) : low ? (
+                    <div style={{ marginBottom: 10 }}><Chip bg={C.amberSoft} fg={C.amber}>Running low</Chip></div>
+                  ) : boughtThisMonth > 0 ? (
+                    <div style={{ marginBottom: 10 }}><Chip bg={C.greenSoft} fg={C.green}>{boughtThisMonth} {mt.unit} bought this month</Chip></div>
+                  ) : null}
+
+                  {!isReadOnly && (
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button onClick={() => onLogTxn(mt.id, 'purchase')} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, background: C.greenSoft, color: C.green, border: 'none', borderRadius: 9, padding: '8px 0', fontSize: 12, fontWeight: 700 }}>
+                        <PackagePlus size={13} /> Log purchase
+                      </button>
+                      <button onClick={() => onLogTxn(mt.id, 'usage')} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, background: C.greySoft, color: C.ink, border: 'none', borderRadius: 9, padding: '8px 0', fontSize: 12, fontWeight: 700 }}>
+                        <PackageMinus size={13} /> Log usage
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <SectionTitle title="Recent transactions" />
+        {recent.length === 0 ? (
+          <MutedNote text="No medicine purchases or usage logged yet." />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {recent.map((t) => {
+              const mt = medicineTypes.find((x) => x.id === t.medicineTypeId);
+              return (
+                <div key={t.id} onClick={() => setViewingTxn(t)} style={rowCardStyle}>
+                  <div style={{ color: t.kind === 'purchase' ? C.green : C.grey }}>
+                    {t.kind === 'purchase' ? <PackagePlus size={16} /> : <PackageMinus size={16} />}
+                  </div>
+                  <div style={{ flex: 1, marginLeft: 10 }}>
+                    <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{mt ? mt.name : 'Unknown'} · {t.quantity} {mt ? mt.unit : ''}</div>
+                    <div style={{ fontSize: 11.5, color: C.sub }}>{fmtDate(t.date)} · {t.kind === 'purchase' ? `Purchased${t.cost ? ` · ₹${t.cost}` : ''}` : 'Used'}</div>
+                  </div>
+                  <ChevronRight size={16} color={C.grey} />
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      {!isReadOnly && <FAB onClick={onAddType} label="Add medicine" />}
+      {viewingTxn && (
+        <MedicineTxnDetailModal
+          record={viewingTxn}
+          medicineType={medicineTypes.find((m) => m.id === viewingTxn.medicineTypeId)}
+          onClose={() => setViewingTxn(null)}
+          onUpdate={(id, data) => { onUpdateTxn(id, data); setViewingTxn(null); }}
+          onDelete={(id) => { onDeleteTxn(id); setViewingTxn(null); }}
+        />
+      )}
     </div>
   );
 }
@@ -3100,11 +3338,136 @@ function FeedTxnDetailModal({ record, feedType, onClose, onUpdate, onDelete }) {
   );
 }
 
+// ================= MEDICINE STOCK =================
+function MedicineTypeForm({ initial, onClose, onSave }) {
+  const [name, setName] = useState(initial?.name || '');
+  const [unit, setUnit] = useState(initial?.unit || 'tablets');
+  const [costPerUnit, setCostPerUnit] = useState(initial?.costPerUnit ?? '');
+  const [lowStockThreshold, setLowStockThreshold] = useState(initial?.lowStockThreshold ?? 5);
+  const valid = name.trim() && unit.trim();
+
+  return (
+    <Modal title={initial ? 'Edit Medicine' : 'Add Medicine'} onClose={onClose}>
+      <Field label="Medicine name"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Oxytetracycline" style={inputStyle} /></Field>
+      <Field label="Unit"><Segmented options={['tablets', 'ml', 'bottles', 'doses', 'sachets']} value={unit} onChange={setUnit} /></Field>
+      <Field label="Cost per unit (₹, optional)"><input type="number" min={0} value={costPerUnit} onChange={(e) => setCostPerUnit(e.target.value)} placeholder="e.g. 15" style={inputStyle} /></Field>
+      <Field label="Low stock alert when at or below">
+        <input type="number" min={0} value={lowStockThreshold} onChange={(e) => setLowStockThreshold(e.target.value)} style={inputStyle} />
+      </Field>
+      <PrimaryButton
+        disabled={!valid}
+        onClick={() => onSave({ name: name.trim(), unit: unit.trim(), costPerUnit: costPerUnit === '' ? '' : Number(costPerUnit), lowStockThreshold: lowStockThreshold === '' ? 5 : Number(lowStockThreshold) })}
+      >
+        {initial ? 'Save changes' : 'Add medicine'}
+      </PrimaryButton>
+    </Modal>
+  );
+}
+
+function MedicineTxnForm({ medicineType, kind, onClose, onSave }) {
+  const [date, setDate] = useState(todayStr());
+  const [quantity, setQuantity] = useState('');
+  const [cost, setCost] = useState('');
+  const valid = date && quantity !== '' && Number(quantity) > 0;
+  const suggestedCost = medicineType && quantity !== '' ? (Number(quantity) * Number(medicineType.costPerUnit || 0)).toFixed(0) : '';
+
+  return (
+    <Modal title={`${kind === 'purchase' ? 'Log Purchase' : 'Log Usage'} — ${medicineType ? medicineType.name : ''}`} onClose={onClose}>
+      <Field label="Date"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} max={todayStr()} /></Field>
+      <Field label={`Quantity (${medicineType ? medicineType.unit : 'units'})`}>
+        <input type="number" min={0} step="0.5" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="e.g. 10" style={inputStyle} />
+      </Field>
+      {kind === 'purchase' && (
+        <Field label="Total cost (₹, optional)">
+          <input type="number" min={0} value={cost} onChange={(e) => setCost(e.target.value)} placeholder={suggestedCost ? `Suggested: ${suggestedCost}` : 'e.g. 300'} style={inputStyle} />
+        </Field>
+      )}
+      <PrimaryButton
+        disabled={!valid}
+        onClick={() => onSave({ date, quantity: Number(quantity), cost: kind === 'purchase' ? Number(cost || suggestedCost || 0) : undefined })}
+      >
+        Save {kind === 'purchase' ? 'purchase' : 'usage'}
+      </PrimaryButton>
+    </Modal>
+  );
+}
+
+function MedicineTxnDetailModal({ record, medicineType, onClose, onUpdate, onDelete }) {
+  const { isReadOnly } = useContext(RoleContext);
+  const [editing, setEditing] = useState(false);
+  const [quantity, setQuantity] = useState(String(record.quantity));
+  const [cost, setCost] = useState(record.cost != null ? String(record.cost) : '');
+  const [confirmDel, setConfirmDel] = useState(false);
+
+  if (confirmDel) {
+    return (
+      <Modal title="Delete this entry?" onClose={() => setConfirmDel(false)}>
+        <div style={{ fontSize: 13, color: C.sub, marginBottom: 14 }}>
+          This removes this {record.kind} entry ({record.quantity} {medicineType ? medicineType.unit : 'units'}) for {fmtDate(record.date)}. This can't be undone.
+        </div>
+        <PrimaryButton danger onClick={() => onDelete(record.id)}>Delete permanently</PrimaryButton>
+      </Modal>
+    );
+  }
+
+  const save = () => {
+    const n = Number(quantity);
+    if (isNaN(n) || n <= 0) return;
+    const data = { quantity: n };
+    if (record.kind === 'purchase') data.cost = cost === '' ? null : Number(cost);
+    onUpdate(record.id, data);
+  };
+
+  return (
+    <Modal title={`${record.kind === 'purchase' ? 'Purchase' : 'Usage'} Entry`} onClose={onClose}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+        <div style={{ color: record.kind === 'purchase' ? C.green : C.grey }}>
+          {record.kind === 'purchase' ? <PackagePlus size={18} /> : <PackageMinus size={18} />}
+        </div>
+        <div>
+          <div className="ff-display" style={{ fontWeight: 700, fontSize: 14, color: C.ink }}>{medicineType ? medicineType.name : 'Unknown medicine'}</div>
+          <div style={{ fontSize: 11.5, color: C.sub }}>{fmtDate(record.date)}</div>
+        </div>
+      </div>
+
+      {editing ? (
+        <>
+          <Field label={`Quantity (${medicineType ? medicineType.unit : 'units'})`}>
+            <input type="number" min={0} step="0.5" value={quantity} onChange={(e) => setQuantity(e.target.value)} style={inputStyle} />
+          </Field>
+          {record.kind === 'purchase' && (
+            <Field label="Total cost (₹)"><input type="number" min={0} value={cost} onChange={(e) => setCost(e.target.value)} style={inputStyle} /></Field>
+          )}
+          <PrimaryButton onClick={save}>Save changes</PrimaryButton>
+        </>
+      ) : (
+        <>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 18 }}>
+            <DetailRow label="Quantity" value={`${record.quantity} ${medicineType ? medicineType.unit : ''}`} />
+            {record.kind === 'purchase' && <DetailRow label="Total cost" value={record.cost ? `₹${record.cost}` : '—'} />}
+            {record.notes && <DetailRow label="Notes" value={record.notes} />}
+          </div>
+          {!isReadOnly && (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => setEditing(true)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.greenSoft, color: C.green, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 13, fontWeight: 700 }}>
+                <Pencil size={14} /> Edit
+              </button>
+              <button onClick={() => setConfirmDel(true)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.rustSoft, color: C.rust, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 13, fontWeight: 700 }}>
+                <Trash2 size={14} /> Delete
+              </button>
+            </div>
+          )}
+        </>
+      )}
+    </Modal>
+  );
+}
+
 // ================= FINANCE =================
 const INCOME_CATEGORIES = ['Milk Sale', 'Animal Sale', 'Other'];
 const EXPENSE_CATEGORIES = ['Medical', 'Other'];
 
-function FinanceScreen({ financeEntries, feedTransactions, feedTypes, onAdd, onEdit, onDelete, onExport }) {
+function FinanceScreen({ financeEntries, feedTransactions, feedTypes, medicineTransactions, medicineTypes, onAdd, onEdit, onDelete, onExport }) {
   const { isReadOnly } = useContext(RoleContext);
   const [viewing, setViewing] = useState(null);
   const [confirmDelId, setConfirmDelId] = useState(null);
@@ -3123,9 +3486,22 @@ function FinanceScreen({ financeEntries, feedTransactions, feedTypes, onAdd, onE
       })
   ), [feedTransactions, feedTypes]);
 
+  const medicineExpenseRows = useMemo(() => (
+    medicineTransactions
+      .filter((t) => t.kind === 'usage')
+      .map((t) => {
+        const mt = medicineTypes.find((m) => m.id === t.medicineTypeId);
+        const amount = mt ? Number(t.quantity) * Number(mt.costPerUnit || 0) : 0;
+        return {
+          id: `medicine-${t.id}`, date: t.date, type: 'expense', category: 'Medical',
+          amount, notes: mt ? `${t.quantity} ${mt.unit} of ${mt.name} used` : `${t.quantity} units used`, isMedicine: true,
+        };
+      })
+  ), [medicineTransactions, medicineTypes]);
+
   const allExpenses = useMemo(() => (
-    [...feedExpenseRows, ...financeEntries.filter((e) => e.type === 'expense')]
-  ), [feedExpenseRows, financeEntries]);
+    [...feedExpenseRows, ...medicineExpenseRows, ...financeEntries.filter((e) => e.type === 'expense')]
+  ), [feedExpenseRows, medicineExpenseRows, financeEntries]);
 
   const allIncome = useMemo(() => financeEntries.filter((e) => e.type === 'income'), [financeEntries]);
 
@@ -3135,7 +3511,7 @@ function FinanceScreen({ financeEntries, feedTransactions, feedTypes, onAdd, onE
   const netThisMonth = incomeThisMonth - expenseThisMonth;
 
   const feedThisMonth = feedExpenseRows.filter(inMonth).reduce((s, e) => s + e.amount, 0);
-  const medicalThisMonth = financeEntries.filter((e) => e.type === 'expense' && e.category === 'Medical' && inMonth(e)).reduce((s, e) => s + Number(e.amount), 0);
+  const medicalThisMonth = allExpenses.filter((e) => e.category === 'Medical' && inMonth(e)).reduce((s, e) => s + Number(e.amount), 0);
   const otherExpThisMonth = financeEntries.filter((e) => e.type === 'expense' && e.category === 'Other' && inMonth(e)).reduce((s, e) => s + Number(e.amount), 0);
 
   const recentAll = useMemo(() => (
@@ -3199,18 +3575,18 @@ function FinanceScreen({ financeEntries, feedTransactions, feedTypes, onAdd, onE
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {recentAll.map((e) => (
-              <div key={e.id} onClick={() => !e.isFeed && setViewing(e)} style={rowCardStyle}>
+              <div key={e.id} onClick={() => !e.isFeed && !e.isMedicine && setViewing(e)} style={rowCardStyle}>
                 <div style={{ color: e.type === 'income' ? C.green : C.rust }}>
                   {e.type === 'income' ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
                 </div>
                 <div style={{ flex: 1, marginLeft: 10 }}>
-                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{e.category}{e.isFeed ? ' (from Feed tab)' : ''}</div>
+                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{e.category}{e.isFeed ? ' (from Feed tab)' : e.isMedicine ? ' (from Health tab)' : ''}</div>
                   <div style={{ fontSize: 11.5, color: C.sub }}>{fmtDate(e.date)}{e.notes ? ` · ${e.notes}` : ''}</div>
                 </div>
                 <div className="ff-display" style={{ fontWeight: 700, fontSize: 15, color: e.type === 'income' ? C.green : C.rust }}>
                   {e.type === 'income' ? '+' : '−'}₹{Number(e.amount).toFixed(0)}
                 </div>
-                {!e.isFeed && <ChevronRight size={16} color={C.grey} style={{ marginLeft: 4 }} />}
+                {!e.isFeed && !e.isMedicine && <ChevronRight size={16} color={C.grey} style={{ marginLeft: 4 }} />}
               </div>
             ))}
           </div>
