@@ -1316,8 +1316,6 @@ export default function App() {
                   financeEntries={financeEntries}
                   feedTransactions={feedTransactions}
                   feedTypes={feedTypes}
-                  medicineTransactions={medicineTransactions}
-                  medicineTypes={medicineTypes}
                   onAdd={(type) => setModal({ type: 'finance', entryType: type })}
                   onEdit={(id) => setModal({ type: 'finance', editId: id })}
                   onDelete={async (id) => {
@@ -3467,7 +3465,7 @@ function MedicineTxnDetailModal({ record, medicineType, onClose, onUpdate, onDel
 const INCOME_CATEGORIES = ['Milk Sale', 'Animal Sale', 'Other'];
 const EXPENSE_CATEGORIES = ['Medical', 'Other'];
 
-function FinanceScreen({ financeEntries, feedTransactions, feedTypes, medicineTransactions, medicineTypes, onAdd, onEdit, onDelete, onExport }) {
+function FinanceScreen({ financeEntries, feedTransactions, feedTypes, onAdd, onEdit, onDelete, onExport }) {
   const { isReadOnly } = useContext(RoleContext);
   const [viewing, setViewing] = useState(null);
   const [confirmDelId, setConfirmDelId] = useState(null);
@@ -3486,22 +3484,9 @@ function FinanceScreen({ financeEntries, feedTransactions, feedTypes, medicineTr
       })
   ), [feedTransactions, feedTypes]);
 
-  const medicineExpenseRows = useMemo(() => (
-    medicineTransactions
-      .filter((t) => t.kind === 'usage')
-      .map((t) => {
-        const mt = medicineTypes.find((m) => m.id === t.medicineTypeId);
-        const amount = mt ? Number(t.quantity) * Number(mt.costPerUnit || 0) : 0;
-        return {
-          id: `medicine-${t.id}`, date: t.date, type: 'expense', category: 'Medical',
-          amount, notes: mt ? `${t.quantity} ${mt.unit} of ${mt.name} used` : `${t.quantity} units used`, isMedicine: true,
-        };
-      })
-  ), [medicineTransactions, medicineTypes]);
-
   const allExpenses = useMemo(() => (
-    [...feedExpenseRows, ...medicineExpenseRows, ...financeEntries.filter((e) => e.type === 'expense')]
-  ), [feedExpenseRows, medicineExpenseRows, financeEntries]);
+    [...feedExpenseRows, ...financeEntries.filter((e) => e.type === 'expense')]
+  ), [feedExpenseRows, financeEntries]);
 
   const allIncome = useMemo(() => financeEntries.filter((e) => e.type === 'income'), [financeEntries]);
 
@@ -3511,7 +3496,7 @@ function FinanceScreen({ financeEntries, feedTransactions, feedTypes, medicineTr
   const netThisMonth = incomeThisMonth - expenseThisMonth;
 
   const feedThisMonth = feedExpenseRows.filter(inMonth).reduce((s, e) => s + e.amount, 0);
-  const medicalThisMonth = allExpenses.filter((e) => e.category === 'Medical' && inMonth(e)).reduce((s, e) => s + Number(e.amount), 0);
+  const medicalThisMonth = financeEntries.filter((e) => e.type === 'expense' && e.category === 'Medical' && inMonth(e)).reduce((s, e) => s + Number(e.amount), 0);
   const otherExpThisMonth = financeEntries.filter((e) => e.type === 'expense' && e.category === 'Other' && inMonth(e)).reduce((s, e) => s + Number(e.amount), 0);
 
   const recentAll = useMemo(() => (
@@ -3575,18 +3560,18 @@ function FinanceScreen({ financeEntries, feedTransactions, feedTypes, medicineTr
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {recentAll.map((e) => (
-              <div key={e.id} onClick={() => !e.isFeed && !e.isMedicine && setViewing(e)} style={rowCardStyle}>
+              <div key={e.id} onClick={() => !e.isFeed && setViewing(e)} style={rowCardStyle}>
                 <div style={{ color: e.type === 'income' ? C.green : C.rust }}>
                   {e.type === 'income' ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
                 </div>
                 <div style={{ flex: 1, marginLeft: 10 }}>
-                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{e.category}{e.isFeed ? ' (from Feed tab)' : e.isMedicine ? ' (from Health tab)' : ''}</div>
+                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{e.category}{e.isFeed ? ' (from Feed tab)' : ''}</div>
                   <div style={{ fontSize: 11.5, color: C.sub }}>{fmtDate(e.date)}{e.notes ? ` · ${e.notes}` : ''}</div>
                 </div>
                 <div className="ff-display" style={{ fontWeight: 700, fontSize: 15, color: e.type === 'income' ? C.green : C.rust }}>
                   {e.type === 'income' ? '+' : '−'}₹{Number(e.amount).toFixed(0)}
                 </div>
-                {!e.isFeed && !e.isMedicine && <ChevronRight size={16} color={C.grey} style={{ marginLeft: 4 }} />}
+                {!e.isFeed && <ChevronRight size={16} color={C.grey} style={{ marginLeft: 4 }} />}
               </div>
             ))}
           </div>
