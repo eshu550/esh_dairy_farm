@@ -1039,6 +1039,12 @@ export default function App() {
     setHeat(heat.filter((h) => h.id !== record.id));
   };
 
+  const onEditMedical = (record) => setModal({ type: 'medical', cowId: record.cowId, editId: record.id });
+  const onDeleteMedical = async (record) => {
+    await supabase.from('medical_records').delete().eq('id', record.id);
+    setMedical(medical.filter((m) => m.id !== record.id));
+  };
+
   const heatStatusFor = (cow) => {
     if (cow.pregnancyConfirmed) return { status: 'pregnant' };
     const recs = heat.filter((h) => h.cowId === cow.id).sort((a, b) => b.date.localeCompare(a.date));
@@ -1145,6 +1151,8 @@ export default function App() {
               onEditHeat={onEditHeat}
               onDeleteHeat={onDeleteHeat}
               onAddMedical={() => setModal({ type: 'medical', cowId: openCowId })}
+              onEditMedical={onEditMedical}
+              onDeleteMedical={onDeleteMedical}
               onToggleMedComplete={async (record, completed) => {
                 const { data: row, error } = await supabase.from('medical_records').update({ completed }).eq('id', record.id).select().single();
                 if (error) throw new Error(error.message);
@@ -1230,6 +1238,8 @@ export default function App() {
                     if (error) throw new Error(error.message);
                     if (row) setMedical(medical.map((m) => (m.id === record.id ? mapMedFromRow(row) : m)));
                   }}
+                  onEditMedical={onEditMedical}
+                  onDeleteMedical={onDeleteMedical}
                   medicineTypes={medicineTypes}
                   medicineTransactions={medicineTransactions}
                   onAddMedicineType={() => setModal({ type: 'medicineType' })}
@@ -1423,11 +1433,23 @@ export default function App() {
           {modal && modal.type === 'medical' && (
             <MedicalForm
               cows={cows} defaultCowId={modal.cowId}
+              initial={modal.editId ? medical.find((m) => m.id === modal.editId) : null}
               onClose={() => setModal(null)}
               onSave={async ({ cowIds, ...rest }) => {
-                const rowsToInsert = cowIds.map((cid) => medToRow({ ...rest, cowId: cid }, userId));
-                const { data: rows, error } = await supabase.from('medical_records').insert(rowsToInsert).select();
-                if (!error && rows) setMedical([...medical, ...rows.map(mapMedFromRow)]);
+                if (modal.editId) {
+                  const orig = medical.find((m) => m.id === modal.editId);
+                  const { data: row, error } = await supabase
+                    .from('medical_records')
+                    .update(medToRow({ ...rest, cowId: cowIds[0], completed: orig?.completed }, userId))
+                    .eq('id', modal.editId)
+                    .select()
+                    .single();
+                  if (!error && row) setMedical(medical.map((m) => (m.id === modal.editId ? mapMedFromRow(row) : m)));
+                } else {
+                  const rowsToInsert = cowIds.map((cid) => medToRow({ ...rest, cowId: cid }, userId));
+                  const { data: rows, error } = await supabase.from('medical_records').insert(rowsToInsert).select();
+                  if (!error && rows) setMedical([...medical, ...rows.map(mapMedFromRow)]);
+                }
                 setModal(null);
               }}
             />
@@ -1823,7 +1845,7 @@ function CowsScreen({ cows, heatStatusFor, onOpenCow, onAddCow, onAddCalf, onExp
 }
 
 // ---------- Cow detail ----------
-function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus, initialTab, onBack, onEdit, onDelete, onAddMilk, onAddHeat, onAddMedical, onAddCalf, onOpenCow, onEditHeat, onDeleteHeat, onToggleMedComplete, onExport }) {
+function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus, initialTab, onBack, onEdit, onDelete, onAddMilk, onAddHeat, onAddMedical, onEditMedical, onDeleteMedical, onAddCalf, onOpenCow, onEditHeat, onDeleteHeat, onToggleMedComplete, onExport }) {
   const { isReadOnly } = useContext(RoleContext);
   const [sub, setSub] = useState(initialTab || (cow?.status === 'calf' ? 'health' : 'milk'));
   useEffect(() => {
@@ -2044,6 +2066,8 @@ function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus,
           cow={cow}
           onClose={() => setViewingMed(null)}
           onSaveComplete={async (r, completed) => { await onToggleMedComplete(r, completed); setViewingMed({ ...r, completed }); }}
+          onEdit={(r) => { setViewingMed(null); onEditMedical(r); }}
+          onDelete={(r) => { setViewingMed(null); onDeleteMedical(r); }}
         />
       )}
       {viewingHeat && (
@@ -2428,12 +2452,23 @@ function HeatDetailModal({ record, cow, onClose, onEdit, onDelete }) {
   );
 }
 
-function HealthDetailModal({ record, cow, onClose, onSaveComplete }) {
+function HealthDetailModal({ record, cow, onClose, onSaveComplete, onEdit, onDelete }) {
+  const { isReadOnly } = useContext(RoleContext);
   const [completed, setCompleted] = useState(!!record?.completed);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(false);
   if (!record) return null;
+
+  if (confirmDel) {
+    return (
+      <Modal title="Delete this health record?" onClose={() => setConfirmDel(false)}>
+        <div style={{ fontSize: 13, color: C.sub, marginBottom: 14 }}>This removes the {record.type.toLowerCase()} record from {fmtDate(record.date)}. This can't be undone.</div>
+        <PrimaryButton danger onClick={() => onDelete(record)}>Delete permanently</PrimaryButton>
+      </Modal>
+    );
+  }
 
   const dirty = completed !== !!record.completed;
 
@@ -2474,6 +2509,16 @@ function HealthDetailModal({ record, cow, onClose, onSaveComplete }) {
           </div>
         )}
       </div>
+      {!isReadOnly && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: record.nextDueDate ? 12 : 0 }}>
+          <button onClick={() => onEdit(record)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.greenSoft, color: C.green, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 13, fontWeight: 700 }}>
+            <Pencil size={14} /> Edit
+          </button>
+          <button onClick={() => setConfirmDel(true)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.rustSoft, color: C.rust, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 13, fontWeight: 700 }}>
+            <Trash2 size={14} /> Delete
+          </button>
+        </div>
+      )}
       {record.nextDueDate && (
         <>
           <button
@@ -2513,7 +2558,7 @@ function DetailRow({ label, value }) {
 }
 
 function HealthScreen({
-  medical, cowById, onAdd, onExport, onToggleComplete,
+  medical, cowById, onAdd, onExport, onToggleComplete, onEditMedical, onDeleteMedical,
   medicineTypes, medicineTransactions, onAddMedicineType, onEditMedicineType, onDeleteMedicineType,
   onLogMedicineTxn, onUpdateMedicineTxn, onDeleteMedicineTxn, onExportMedicine,
 }) {
@@ -2582,7 +2627,16 @@ function HealthScreen({
           </div>
         )}
       </div>
-      {viewing && <HealthDetailModal record={viewing} cow={cowById(viewing.cowId)} onClose={() => setViewing(null)} onSaveComplete={async (r, completed) => { await onToggleComplete(r, completed); setViewing({ ...r, completed }); }} />}
+      {viewing && (
+        <HealthDetailModal
+          record={viewing}
+          cow={cowById(viewing.cowId)}
+          onClose={() => setViewing(null)}
+          onSaveComplete={async (r, completed) => { await onToggleComplete(r, completed); setViewing({ ...r, completed }); }}
+          onEdit={(r) => { setViewing(null); onEditMedical(r); }}
+          onDelete={(r) => { setViewing(null); onDeleteMedical(r); }}
+        />
+      )}
       <FAB onClick={onAdd} label="Add record" />
     </div>
   );
@@ -3045,18 +3099,29 @@ function CowMultiPicker({ cows, selected, onChange }) {
   );
 }
 
-function MedicalForm({ cows, defaultCowId, onClose, onSave }) {
-  const [cowIds, setCowIds] = useState(defaultCowId ? [defaultCowId] : []);
-  const [date, setDate] = useState(todayStr());
-  const [type, setType] = useState(MED_TYPES[0]);
-  const [medicine, setMedicine] = useState('');
-  const [description, setDescription] = useState('');
-  const [vet, setVet] = useState('');
-  const [nextDueDate, setNextDueDate] = useState('');
+function MedicalForm({ cows, defaultCowId, initial, onClose, onSave }) {
+  const fixedCowId = initial?.cowId || defaultCowId;
+  const [cowIds, setCowIds] = useState(fixedCowId ? [fixedCowId] : []);
+  const [date, setDate] = useState(initial?.date || todayStr());
+  const [type, setType] = useState(initial?.type || MED_TYPES[0]);
+  const [medicine, setMedicine] = useState(initial?.medicine || '');
+  const [description, setDescription] = useState(initial?.description || '');
+  const [vet, setVet] = useState(initial?.vet || '');
+  const [nextDueDate, setNextDueDate] = useState(initial?.nextDueDate || '');
   const valid = cowIds.length > 0 && date && type;
+  const cow = fixedCowId ? cows.find((c) => c.id === fixedCowId) : null;
   return (
-    <Modal title="Add Health Record" onClose={onClose}>
-      {!defaultCowId && <CowMultiPicker cows={cows} selected={cowIds} onChange={setCowIds} />}
+    <Modal title={initial ? 'Edit Health Record' : 'Add Health Record'} onClose={onClose}>
+      {!fixedCowId && <CowMultiPicker cows={cows} selected={cowIds} onChange={setCowIds} />}
+      {cow && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <EarTag number={cow.tagNumber} size="sm" />
+          <div>
+            <div className="ff-display" style={{ fontWeight: 700, fontSize: 14, color: C.ink }}>{cow.name}</div>
+            <div style={{ fontSize: 11.5, color: C.sub }}>{cow.breed}</div>
+          </div>
+        </div>
+      )}
       <Field label="Date"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} max={todayStr()} /></Field>
       <Field label="Type"><Segmented options={MED_TYPES} value={type} onChange={setType} /></Field>
       <Field label="Medicine used (optional)"><input value={medicine} onChange={(e) => setMedicine(e.target.value)} placeholder="e.g. Albendazole" style={inputStyle} /></Field>
@@ -3066,7 +3131,7 @@ function MedicalForm({ cows, defaultCowId, onClose, onSave }) {
       <Field label="Vet / attended by (optional)"><input value={vet} onChange={(e) => setVet(e.target.value)} placeholder="e.g. Dr. Rao" style={inputStyle} /></Field>
       <Field label="Next follow-up date (optional)"><input type="date" value={nextDueDate} onChange={(e) => setNextDueDate(e.target.value)} style={inputStyle} /></Field>
       <PrimaryButton disabled={!valid} onClick={() => onSave({ cowIds, date, type, medicine: medicine.trim(), description: description.trim(), vet: vet.trim(), nextDueDate })}>
-        Save record{cowIds.length > 1 ? ` for ${cowIds.length} cows` : ''}
+        {initial ? 'Save changes' : `Save record${cowIds.length > 1 ? ` for ${cowIds.length} cows` : ''}`}
       </PrimaryButton>
     </Modal>
   );
