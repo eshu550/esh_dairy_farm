@@ -87,9 +87,9 @@ const monthLabel = (m) => {
   return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 };
 const shiftMonth = (m, delta) => {
-  const d = new Date(m + '-01T00:00:00');
-  d.setMonth(d.getMonth() + delta);
-  return d.toISOString().slice(0, 7);
+  const [y, mo] = m.split('-').map(Number);
+  const d = new Date(y, mo - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 };
 function MonthSwitcher({ month, onChange }) {
   const isCurrent = month === currentMonthStr();
