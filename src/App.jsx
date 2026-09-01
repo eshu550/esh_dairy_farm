@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useContext } from 'react';
 import {
   Home, Milk, HeartPulse, Stethoscope, Plus, ArrowLeft, X,
-  Calendar, Search, Check, ChevronRight, Trash2, Pencil, Droplet, Syringe, Printer, Download, Wheat, Baby, PackageMinus, PackagePlus, Upload, LogOut, Mail, Lock, Users, UserPlus, Eye, KeyRound, UserCircle, Wallet, TrendingUp, TrendingDown
+  Calendar, Search, Check, ChevronRight, ChevronLeft, Trash2, Pencil, Droplet, Syringe, Printer, Download, Wheat, Baby, PackageMinus, PackagePlus, Upload, LogOut, Mail, Lock, Users, UserPlus, Eye, KeyRound, UserCircle, Wallet, TrendingUp, TrendingDown
 } from 'lucide-react';
 import ReactDOM from 'react-dom';
 import { supabase, configMissing } from './supabaseClient.js';
@@ -86,6 +86,39 @@ const monthLabel = (m) => {
   const d = new Date(m + '-01T00:00:00');
   return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 };
+const shiftMonth = (m, delta) => {
+  const d = new Date(m + '-01T00:00:00');
+  d.setMonth(d.getMonth() + delta);
+  return d.toISOString().slice(0, 7);
+};
+function MonthSwitcher({ month, onChange }) {
+  const isCurrent = month === currentMonthStr();
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+      <button onClick={() => onChange(shiftMonth(month, -1))} aria-label="Previous month" className="ff-body" style={{ width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', border: `1.5px solid ${C.line}`, borderRadius: 10, color: C.ink, flexShrink: 0 }}>
+        <ChevronLeft size={16} />
+      </button>
+      <label style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#fff', border: `1.5px solid ${C.line}`, borderRadius: 10, padding: '8px 10px', cursor: 'pointer' }}>
+        <Calendar size={14} color={C.sub} />
+        <span className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{monthLabel(month)}</span>
+        <input
+          type="month"
+          value={month}
+          onChange={(e) => e.target.value && onChange(e.target.value)}
+          style={{ position: 'absolute', inset: 0, opacity: 0, width: '100%', height: '100%', cursor: 'pointer' }}
+        />
+      </label>
+      <button onClick={() => onChange(shiftMonth(month, 1))} aria-label="Next month" className="ff-body" style={{ width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', border: `1.5px solid ${C.line}`, borderRadius: 10, color: C.ink, flexShrink: 0 }}>
+        <ChevronRight size={16} />
+      </button>
+      {!isCurrent && (
+        <button onClick={() => onChange(currentMonthStr())} className="ff-body" style={{ flexShrink: 0, background: C.greenSoft, color: C.green, border: 'none', borderRadius: 10, padding: '8px 10px', fontSize: 12, fontWeight: 700 }}>
+          Today
+        </button>
+      )}
+    </div>
+  );
+}
 function feedStock(feedTypeId, txns) {
   return txns.filter((t) => t.feedTypeId === feedTypeId).reduce((s, t) => s + (t.kind === 'purchase' ? Number(t.bags) : -Number(t.bags)), 0);
 }
@@ -3534,7 +3567,7 @@ function FinanceScreen({ financeEntries, feedTransactions, feedTypes, onAdd, onE
   const { isReadOnly } = useContext(RoleContext);
   const [viewing, setViewing] = useState(null);
   const [confirmDelId, setConfirmDelId] = useState(null);
-  const month = currentMonthStr();
+  const [month, setMonth] = useState(currentMonthStr());
 
   const feedExpenseRows = useMemo(() => (
     feedTransactions
@@ -3565,8 +3598,8 @@ function FinanceScreen({ financeEntries, feedTransactions, feedTypes, onAdd, onE
   const otherExpThisMonth = financeEntries.filter((e) => e.type === 'expense' && e.category === 'Other' && inMonth(e)).reduce((s, e) => s + Number(e.amount), 0);
 
   const recentAll = useMemo(() => (
-    [...allIncome, ...allExpenses].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 12)
-  ), [allIncome, allExpenses]);
+    [...allIncome, ...allExpenses].filter(inMonth).sort((a, b) => b.date.localeCompare(a.date))
+  ), [allIncome, allExpenses, month]);
 
   return (
     <div>
@@ -3580,6 +3613,7 @@ function FinanceScreen({ financeEntries, feedTransactions, feedTypes, onAdd, onE
         }
       />
       <div style={{ padding: 16 }}>
+        <MonthSwitcher month={month} onChange={setMonth} />
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
           <StatCard label="Income this mo." value={`₹${incomeThisMonth.toFixed(0)}`} bg={C.greenSoft} fg={C.green} icon={<TrendingUp size={16} />} />
           <StatCard label="Expenses this mo." value={`₹${expenseThisMonth.toFixed(0)}`} bg={C.rustSoft} fg={C.rust} icon={<TrendingDown size={16} />} />
@@ -3592,7 +3626,7 @@ function FinanceScreen({ financeEntries, feedTransactions, feedTypes, onAdd, onE
           <Wallet size={26} color={netThisMonth >= 0 ? C.green : C.rust} />
         </div>
 
-        <SectionTitle title="Expense breakdown (this month)" />
+        <SectionTitle title="Expense breakdown" />
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 18 }}>
           <div style={{ background: '#fff', border: `1px solid ${C.line}`, borderRadius: 12, padding: '10px 8px', textAlign: 'center' }}>
             <div style={{ fontSize: 10, color: C.sub, fontWeight: 600 }}>Feed</div>
@@ -3619,9 +3653,9 @@ function FinanceScreen({ financeEntries, feedTransactions, feedTypes, onAdd, onE
           </div>
         )}
 
-        <SectionTitle title="Recent entries" />
+        <SectionTitle title={`Entries — ${monthLabel(month)}`} />
         {recentAll.length === 0 ? (
-          <EmptyState icon={<Wallet size={30} />} title="No entries yet" subtitle="Log your milk sales and other income, plus medical and other expenses. Feed costs are pulled in automatically from the Feed tab." />
+          <EmptyState icon={<Wallet size={30} />} title="No entries this month" subtitle="Log your milk sales and other income, plus medical and other expenses. Feed costs are pulled in automatically from the Feed tab." />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {recentAll.map((e) => (
