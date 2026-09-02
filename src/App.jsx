@@ -2996,7 +2996,9 @@ function MilkForm({ cows, milk, defaultCowId, onClose, onSave }) {
 function MilkBatchForm({ cows, milk, onClose, onSave }) {
   const [date, setDate] = useState(todayStr());
   const [session, setSession] = useState('AM');
+  const [mode, setMode] = useState('Per cow');
   const [values, setValues] = useState({}); // cowId -> string liters
+  const [totalLiters, setTotalLiters] = useState('');
 
   // Whenever date/session changes, prefill from any existing entries for that date+session
   useEffect(() => {
@@ -3013,7 +3015,28 @@ function MilkBatchForm({ cows, milk, onClose, onSave }) {
   const filledCount = Object.values(values).filter((v) => v !== '' && v !== undefined).length;
   const total = Object.values(values).reduce((s, v) => s + (v ? Number(v) : 0), 0);
 
+  const existingCountForSession = cows.filter((c) => milk.find((m) => m.cowId === c.id && m.date === date && m.session === session)).length;
+
+  // Split the total evenly across all cows, nudging the last cow so the sum matches exactly.
+  const splitEntries = () => {
+    const n = cows.length;
+    const t = Number(totalLiters);
+    if (!n || isNaN(t) || t < 0) return [];
+    const base = Math.floor((t / n) * 100) / 100;
+    return cows.map((c, i) => {
+      const existing = milk.find((m) => m.cowId === c.id && m.date === date && m.session === session);
+      const liters = i === n - 1 ? Math.round((t - base * (n - 1)) * 100) / 100 : base;
+      return { cowId: c.id, liters, existingId: existing ? existing.id : null };
+    });
+  };
+
   const handleSave = () => {
+    if (mode === 'Total (herd)') {
+      const entries = splitEntries();
+      if (entries.length === 0) return;
+      onSave({ date, session, entries });
+      return;
+    }
     const entries = cows
       .filter((c) => values[c.id] !== '' && values[c.id] !== undefined && !isNaN(Number(values[c.id])))
       .map((c) => {
@@ -3033,35 +3056,71 @@ function MilkBatchForm({ cows, milk, onClose, onSave }) {
         <MutedNote text="Add a cow first before logging milk." />
       ) : (
         <>
-          <div className="ff-body" style={{ fontSize: 11, fontWeight: 600, color: C.sub, marginBottom: 6 }}>
-            Enter liters for each cow — leave blank to skip a cow for this session.
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
-            {cows.map((c) => (
-              <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: `1px solid ${C.line}`, borderRadius: 10, padding: '8px 10px' }}>
-                <EarTag number={c.tagNumber} size="sm" />
-                <div style={{ flex: 1 }}>
-                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{c.name}</div>
-                  <div style={{ fontSize: 10.5, color: C.sub }}>{c.status !== 'active' ? c.status : '\u00A0'}</div>
-                </div>
-                <input
-                  type="number" min={0} step="0.1" placeholder="—" value={values[c.id] ?? ''}
-                  onChange={(e) => setVal(c.id, e.target.value)}
-                  style={{ ...inputStyle, width: 76, textAlign: 'right', padding: '8px 10px' }}
-                />
-                <span className="ff-body" style={{ fontSize: 12, color: C.sub }}>L</span>
+          <Field label="Entry mode"><Segmented options={['Per cow', 'Total (herd)']} value={mode} onChange={setMode} /></Field>
+
+          {mode === 'Total (herd)' ? (
+            <>
+              <div className="ff-body" style={{ fontSize: 11, fontWeight: 600, color: C.sub, marginBottom: 6 }}>
+                No time to record each cow? Enter the total milk collected and it'll be split evenly across all {cows.length} active cows.
               </div>
-            ))}
-          </div>
-          <div style={{ background: C.milkSoft, borderRadius: 10, padding: '8px 12px', marginBottom: 14, display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
-            <span style={{ color: C.milk, fontWeight: 600 }}>{filledCount} of {cows.length} cows entered</span>
-            <span style={{ color: C.milk, fontWeight: 700 }}>{total.toFixed(1)} L total</span>
-          </div>
+              <Field label={`Total liters — all cows, ${session} session`}>
+                <input
+                  type="number" min={0} step="0.1" value={totalLiters}
+                  onChange={(e) => setTotalLiters(e.target.value)}
+                  placeholder="e.g. 62"
+                  style={inputStyle}
+                />
+              </Field>
+              {existingCountForSession > 0 && (
+                <div className="ff-body" style={{ fontSize: 11.5, color: C.rust, marginTop: -8, marginBottom: 14 }}>
+                  {existingCountForSession} cow{existingCountForSession > 1 ? 's already have' : ' already has'} an entry for this date and session — saving will overwrite {existingCountForSession > 1 ? 'them' : 'it'} with the split amount.
+                </div>
+              )}
+              {totalLiters !== '' && !isNaN(Number(totalLiters)) && Number(totalLiters) >= 0 && (
+                <div style={{ background: C.milkSoft, borderRadius: 10, padding: '8px 12px', marginBottom: 14, display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+                  <span style={{ color: C.milk, fontWeight: 600 }}>≈ {(Number(totalLiters) / cows.length).toFixed(2)} L / cow</span>
+                  <span style={{ color: C.milk, fontWeight: 700 }}>{Number(totalLiters).toFixed(1)} L total</span>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="ff-body" style={{ fontSize: 11, fontWeight: 600, color: C.sub, marginBottom: 6 }}>
+                Enter liters for each cow — leave blank to skip a cow for this session.
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+                {cows.map((c) => (
+                  <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: `1px solid ${C.line}`, borderRadius: 10, padding: '8px 10px' }}>
+                    <EarTag number={c.tagNumber} size="sm" />
+                    <div style={{ flex: 1 }}>
+                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{c.name}</div>
+                      <div style={{ fontSize: 10.5, color: C.sub }}>{c.status !== 'active' ? c.status : '\u00A0'}</div>
+                    </div>
+                    <input
+                      type="number" min={0} step="0.1" placeholder="—" value={values[c.id] ?? ''}
+                      onChange={(e) => setVal(c.id, e.target.value)}
+                      style={{ ...inputStyle, width: 76, textAlign: 'right', padding: '8px 10px' }}
+                    />
+                    <span className="ff-body" style={{ fontSize: 12, color: C.sub }}>L</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ background: C.milkSoft, borderRadius: 10, padding: '8px 12px', marginBottom: 14, display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+                <span style={{ color: C.milk, fontWeight: 600 }}>{filledCount} of {cows.length} cows entered</span>
+                <span style={{ color: C.milk, fontWeight: 700 }}>{total.toFixed(1)} L total</span>
+              </div>
+            </>
+          )}
         </>
       )}
 
-      <PrimaryButton disabled={filledCount === 0} onClick={handleSave}>
-        Save {filledCount > 0 ? `${filledCount} ${filledCount === 1 ? 'entry' : 'entries'}` : 'entries'}
+      <PrimaryButton
+        disabled={mode === 'Total (herd)' ? !(totalLiters !== '' && !isNaN(Number(totalLiters)) && Number(totalLiters) > 0 && cows.length > 0) : filledCount === 0}
+        onClick={handleSave}
+      >
+        {mode === 'Total (herd)'
+          ? `Split ${totalLiters || 0} L across ${cows.length} cow${cows.length === 1 ? '' : 's'}`
+          : `Save ${filledCount > 0 ? `${filledCount} ${filledCount === 1 ? 'entry' : 'entries'}` : 'entries'}`}
       </PrimaryButton>
     </Modal>
   );
