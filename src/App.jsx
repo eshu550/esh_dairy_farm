@@ -208,6 +208,7 @@ function EarTag({ number, tone = 'green', size = 'md' }) {
     brown: { bg: C.brownSoft, fg: C.brown },
     grey: { bg: C.greySoft, fg: C.grey },
     amber: { bg: C.amberSoft, fg: C.amber },
+    blue: { bg: C.milkSoft, fg: C.milk },
   };
   const t = tones[tone] || tones.green;
   const dims = size === 'lg' ? { w: 72, h: 56, fs: 20 } : size === 'sm' ? { w: 40, h: 32, fs: 11 } : { w: 52, h: 40, fs: 14 };
@@ -249,7 +250,7 @@ function EarTag({ number, tone = 'green', size = 'md' }) {
   );
 }
 
-const earTagTone = (status) => (status === 'active' ? 'green' : status === 'dry' ? 'brown' : status === 'calf' ? 'amber' : 'grey');
+const earTagTone = (status) => (status === 'active' ? 'green' : status === 'dry' ? 'brown' : status === 'calf' ? 'amber' : status === 'heifer' ? 'blue' : 'grey');
 
 function StatusPill({ status }) {
   const map = {
@@ -257,6 +258,7 @@ function StatusPill({ status }) {
     dry: { bg: C.brownSoft, fg: C.brown, label: 'Dry' },
     sold: { bg: C.greySoft, fg: C.grey, label: 'Sold' },
     calf: { bg: C.amberSoft, fg: C.amber, label: 'Calf' },
+    heifer: { bg: C.milkSoft, fg: C.milk, label: 'Heifer' },
   };
   const s = map[status] || map.active;
   return (
@@ -1104,6 +1106,7 @@ export default function App() {
 
   const milkToday = useMemo(() => milk.filter((m) => m.date === todayStr()).reduce((s, m) => s + Number(m.liters || 0), 0), [milk]);
   const activeCows = useMemo(() => cows.filter((c) => c.status === 'active'), [cows]);
+  const breedableCows = useMemo(() => cows.filter((c) => c.status !== 'calf' && c.status !== 'sold'), [cows]);
   const heatAlerts = useMemo(() => activeCows.map((c) => ({ cow: c, ...heatStatusFor(c) })).filter((x) => x.status === 'due' || x.status === 'overdue'), [activeCows, heat]);
   const insemAlerts = useMemo(() => activeCows.map((c) => ({ cow: c, ...inseminationStatusFor(c) })).filter((x) => x.status === 'due'), [activeCows]);
   const medDue = useMemo(() => {
@@ -1256,7 +1259,7 @@ export default function App() {
                 />
               )}
               {tab === 'heat' && (
-                <HeatScreen cows={activeCows} heat={heat} heatStatusFor={heatStatusFor} cowById={cowById} onAdd={() => setModal({ type: 'heat' })} onOpenCow={setOpenCowId} onEditHeat={onEditHeat} onDeleteHeat={onDeleteHeat} />
+                <HeatScreen cows={breedableCows} heat={heat} heatStatusFor={heatStatusFor} cowById={cowById} onAdd={() => setModal({ type: 'heat' })} onOpenCow={setOpenCowId} onEditHeat={onEditHeat} onDeleteHeat={onDeleteHeat} />
               )}
               {tab === 'health' && (
                 <HealthScreen
@@ -1447,7 +1450,7 @@ export default function App() {
 
           {modal && modal.type === 'heat' && (
             <HeatForm
-              cows={activeCows} defaultCowId={modal.cowId}
+              cows={breedableCows} defaultCowId={modal.cowId}
               initial={modal.editId ? heat.find((h) => h.id === modal.editId) : null}
               onClose={() => setModal(null)}
               onSave={async (data) => {
@@ -1835,7 +1838,7 @@ function CowsScreen({ cows, heatStatusFor, onOpenCow, onAddCow, onAddCalf, onExp
         </div>
         <div style={{ marginBottom: 14 }}>
           <Segmented
-            options={['All', 'Milking', 'Dry', 'Calf', 'Pregnant']}
+            options={['All', 'Milking', 'Dry', 'Heifer', 'Calf', 'Pregnant']}
             value={statusFilter}
             onChange={setStatusFilter}
           />
@@ -1857,7 +1860,7 @@ function CowsScreen({ cows, heatStatusFor, onOpenCow, onAddCow, onAddCalf, onExp
                     <div className="ff-display" style={{ fontWeight: 700, fontSize: 14.5, color: C.ink }}>{cow.name}</div>
                     <div style={{ fontSize: 11.5, color: C.sub, marginTop: 1 }}>
                       {cow.breed}{cow.dob ? ` · ${fmtDateShort(cow.dob)}` : ''}
-                      {cow.status === 'calf' && cow.motherCowId && nameById[cow.motherCowId] ? ` · Mother: ${nameById[cow.motherCowId]}` : ''}
+                      {(cow.status === 'calf' || cow.status === 'heifer') && cow.motherCowId && nameById[cow.motherCowId] ? ` · Mother: ${nameById[cow.motherCowId]}` : ''}
                     </div>
                     <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                       <StatusPill status={cow.status} />
@@ -1880,10 +1883,10 @@ function CowsScreen({ cows, heatStatusFor, onOpenCow, onAddCow, onAddCalf, onExp
 // ---------- Cow detail ----------
 function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus, initialTab, onBack, onEdit, onDelete, onAddMilk, onAddHeat, onAddMedical, onEditMedical, onDeleteMedical, onAddCalf, onOpenCow, onEditHeat, onDeleteHeat, onToggleMedComplete, onExport }) {
   const { isReadOnly } = useContext(RoleContext);
-  const [sub, setSub] = useState(initialTab || (cow?.status === 'calf' ? 'health' : 'milk'));
+  const [sub, setSub] = useState(initialTab || (['calf', 'heifer'].includes(cow?.status) ? 'health' : 'milk'));
   useEffect(() => {
     if (initialTab) { setSub(initialTab); return; }
-    if (cow?.status === 'calf' && (sub === 'milk' || sub === 'calves')) setSub('health');
+    if (['calf', 'heifer'].includes(cow?.status) && (sub === 'milk' || sub === 'calves')) setSub('health');
   }, [cow?.id, cow?.status, initialTab]); // eslint-disable-line react-hooks/exhaustive-deps
   const [confirmDel, setConfirmDel] = useState(false);
   const [viewingMed, setViewingMed] = useState(null);
@@ -1916,13 +1919,14 @@ function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus,
           <div style={{ flex: 1 }}>
             <StatusPill status={cow.status} />
             <div style={{ fontSize: 11.5, color: C.sub, marginTop: 6 }}>Born {fmtDate(cow.dob)}</div>
-            {cow.status === 'calf' ? (
+            {cow.status === 'calf' || cow.status === 'heifer' ? (
               <>
                 {cow.gender && <div style={{ fontSize: 11.5, color: C.sub }}>Gender: {cow.gender}</div>}
                 {mother && <div style={{ fontSize: 11.5, color: C.sub }}>Mother: {mother.name} (#{mother.tagNumber})</div>}
                 {cow.birthWeight !== '' && cow.birthWeight != null && <div style={{ fontSize: 11.5, color: C.sub }}>Birth weight: {cow.birthWeight} kg</div>}
               </>
-            ) : (
+            ) : null}
+            {cow.status !== 'calf' && (
               <>
                 <div style={{ fontSize: 11.5, color: C.sub }}>Heat cycle: every {cow.cycleLength || 21} days</div>
                 {cow.calvingDate && <div style={{ fontSize: 11.5, color: C.sub }}>Last calving: {fmtDate(cow.calvingDate)}</div>}
@@ -1989,7 +1993,7 @@ function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus,
         )}
 
         <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
-          {cow.status === 'calf' ? (
+          {['calf', 'heifer'].includes(cow.status) ? (
             <Segmented options={['Heat', 'Health']} value={sub === 'heat' ? 'Heat' : 'Health'} onChange={(v) => setSub(v.toLowerCase())} />
           ) : (
             <Segmented options={['Milk', 'Heat', 'Health', 'Calves']} value={sub === 'milk' ? 'Milk' : sub === 'heat' ? 'Heat' : sub === 'health' ? 'Health' : 'Calves'} onChange={(v) => setSub(v.toLowerCase())} />
@@ -2299,7 +2303,7 @@ function HeatScreen({ cows, heat, heatStatusFor, cowById, onAdd, onOpenCow, onEd
       <div style={{ padding: 16 }}>
         <SectionTitle title="Cycle status" />
         {rows.length === 0 ? (
-          <EmptyState icon={<HeartPulse size={30} />} title="No milking cows" subtitle="Add a milking cow to start tracking heat cycles." />
+          <EmptyState icon={<HeartPulse size={30} />} title="No animals yet" subtitle="Add a cow or calf to start tracking heat cycles." />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
             {rows.map(({ cow, status, nextDate, daysUntil }) => (
@@ -2841,16 +2845,29 @@ function CowForm({ initial, defaultStatus, defaultMotherId, cows, onClose, onSav
   const valid = name.trim() && tagNumber.trim();
   const expectedCalving = pregnancyConfirmed && inseminatedOn ? addMonths(inseminatedOn, 9) : '';
   const isCalf = status === 'calf';
+  const isHeifer = status === 'heifer';
+  const isYoungStock = isCalf || isHeifer;
   const motherOptions = (cows || []).filter((c) => !initial || c.id !== initial.id);
 
   return (
-    <Modal title={initial ? 'Edit Animal' : isCalf ? 'Add Calf' : 'Add Cow'} onClose={onClose}>
+    <Modal title={initial ? 'Edit Animal' : isCalf ? 'Add Calf' : isHeifer ? 'Add Heifer' : 'Add Cow'} onClose={onClose}>
       <Field label="Name"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Ganga" style={inputStyle} /></Field>
       <Field label="Ear tag number"><input value={tagNumber} onChange={(e) => setTagNumber(e.target.value)} placeholder="e.g. 014" style={inputStyle} /></Field>
       <Field label="Breed"><Segmented options={BREEDS} value={breed} onChange={setBreed} /></Field>
-      <Field label="Status"><Segmented options={['active', 'dry', 'calf', 'sold']} value={status} onChange={setStatus} labels={{ active: 'Milking', dry: 'Dry', calf: 'Calf', sold: 'Sold' }} /></Field>
+      <Field label="Status">
+        <Segmented
+          options={['active', 'dry', 'heifer', 'calf', 'sold']}
+          value={status} onChange={setStatus}
+          labels={{ active: 'Milking', dry: 'Dry', heifer: 'Heifer', calf: 'Calf', sold: 'Sold' }}
+        />
+        {isHeifer && (
+          <div className="ff-body" style={{ fontSize: 11, color: C.sub, marginTop: 6 }}>
+            A heifer is a grown calf that's old enough to breed — she'll now show up in the Heat Cycles section.
+          </div>
+        )}
+      </Field>
 
-      {isCalf && (
+      {isYoungStock && (
         <>
           <Field label="Gender"><Segmented options={['Female', 'Male']} value={gender} onChange={setGender} /></Field>
           <Field label="Mother (optional)">
@@ -2938,14 +2955,14 @@ function CowForm({ initial, defaultStatus, defaultMotherId, cows, onClose, onSav
       <PrimaryButton
         disabled={!valid}
         onClick={() => onSave({
-          name: name.trim(), tagNumber: tagNumber.trim(), breed, gender: isCalf ? gender : '', dob, status, cycleLength,
-          motherCowId: isCalf ? motherCowId : '', birthWeight: isCalf && birthWeight !== '' ? Number(birthWeight) : '',
+          name: name.trim(), tagNumber: tagNumber.trim(), breed, gender: isYoungStock ? gender : '', dob, status, cycleLength,
+          motherCowId: isYoungStock ? motherCowId : '', birthWeight: isYoungStock && birthWeight !== '' ? Number(birthWeight) : '',
           calvingDate, firstHeatDate, inseminatedOn, pregnancyConfirmed: !!(pregnancyConfirmed && inseminatedOn),
           mastitisAntibiotic: mastitisAntibiotic.trim(),
           insured, insuranceStartDate: insured ? insuranceStartDate : '', insuranceExpiryDate: insured ? insuranceExpiryDate : '',
         })}
       >
-        {initial ? 'Save changes' : isCalf ? 'Add calf' : 'Add cow'}
+        {initial ? 'Save changes' : isCalf ? 'Add calf' : isHeifer ? 'Add heifer' : 'Add cow'}
       </PrimaryButton>
     </Modal>
   );
