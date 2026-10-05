@@ -23,17 +23,18 @@
 // This file never exposes your API key to the browser: the key only ever
 // lives on Vercel's server and is read from the environment at request time.
 
-// Google's free-tier model lineup shifts over time — if this model ever
-// stops being free or gets retired, swap the name here. Check the current
-// list at https://ai.google.dev/gemini-api/docs/pricing
-const MODEL = 'gemini-3.8-flash';
+// Brand-new Flash models get hammered with demand right after launch, so we
+// try the newest one first and fall back to older, less-congested free
+// models if it's overloaded. Check current free-tier status at
+// https://ai.google.dev/gemini-api/docs/pricing
+const MODELS = ['gemini-3.8-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-flash'];
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// The free tier occasionally returns 503 "model is overloaded" — this is
-// genuinely transient (Google says so in the message itself), so retry a
-// couple of times with a short, increasing delay before giving up.
-async function callGeminiWithRetry(url, options, attempts = 3) {
+// The free tier occasionally returns 503 "model is overloaded" or 429 "rate
+// limited" — genuinely transient, so retry briefly before giving up on a
+// given model.
+async function callGemini(url, options, attempts = 2) {
   let lastResponse, lastData;
   for (let i = 0; i < attempts; i++) {
     const response = await fetch(url, options);
@@ -46,6 +47,27 @@ async function callGeminiWithRetry(url, options, attempts = 3) {
     await sleep(600 * (i + 1)); // 600ms, then 1200ms
   }
   return { response: lastResponse, data: lastData };
+}
+
+// Try each model in order, moving to the next only if the current one is
+// overloaded/rate-limited. A non-overload error (bad request, blocked
+// content, etc.) is returned immediately rather than retried on another model.
+async function callGeminiWithFallback(buildBody, apiKey) {
+  let result;
+  for (const model of MODELS) {
+    result = await callGemini(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+        body: JSON.stringify(buildBody()),
+      }
+    );
+    if (result.response.ok) return result;
+    const isOverloaded = result.response.status === 503 || result.response.status === 429;
+    if (!isOverloaded) return result;
+  }
+  return result;
 }
 
 export default async function handler(req, res) {
@@ -93,20 +115,13 @@ ${JSON.stringify(context || {})}`;
   ];
 
   try {
-    const { response, data } = await callGeminiWithRetry(
-      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': apiKey,
-        },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemPrompt }] },
-          contents,
-          generationConfig: { maxOutputTokens: 1024 },
-        }),
-      }
+    const { response, data } = await callGeminiWithFallback(
+      () => ({
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        contents,
+        generationConfig: { maxOutputTokens: 1024 },
+      }),
+      apiKey
     );
 
     if (!response.ok) {
