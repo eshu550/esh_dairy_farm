@@ -26,7 +26,7 @@
 // Google's free-tier model lineup shifts over time — if this model ever
 // stops being free or gets retired, swap the name here. Check the current
 // list at https://ai.google.dev/gemini-api/docs/pricing
-const MODEL = 'gemini-2.5-flash';
+const MODEL = 'gemini-3.8-flash';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
