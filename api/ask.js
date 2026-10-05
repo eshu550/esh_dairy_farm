@@ -1,20 +1,32 @@
 // api/ask.js
 //
-// Vercel serverless function — secure proxy to the Anthropic API for the
+// Vercel serverless function — secure proxy to Google's Gemini API for the
 // in-app "Ask AI" feature. Vercel auto-detects anything under /api as a
 // serverless function regardless of your frontend framework, so you don't
 // need any extra config for this to work alongside your Vite app.
 //
+// This uses Gemini instead of Claude because Gemini has a genuine free tier
+// (no card, no spend) for the model below — a good fit for a single farm
+// asking a handful of questions a day. The trade-off: on the free tier,
+// Google may use what you send to improve their models, and there are
+// rate limits (generous enough for personal use, but they exist).
+//
 // SETUP (one-time):
-//   1. Get an API key at https://console.anthropic.com/settings/keys
+//   1. Go to https://aistudio.google.com/app/apikey and click "Create API key"
+//      (sign in with any Google account — no billing required for the free tier).
 //   2. In your Vercel project: Settings -> Environment Variables
-//        Name:  ANTHROPIC_API_KEY
-//        Value: sk-ant-...   (paste your key)
+//        Name:  GEMINI_API_KEY
+//        Value: (paste the key)
 //      Add it for Production (and Preview/Development if you test locally).
 //   3. Redeploy. That's it — no other code changes needed.
 //
 // This file never exposes your API key to the browser: the key only ever
 // lives on Vercel's server and is read from the environment at request time.
+
+// Google's free-tier model lineup shifts over time — if this model ever
+// stops being free or gets retired, swap the name here. Check the current
+// list at https://ai.google.dev/gemini-api/docs/pricing
+const MODEL = 'gemini-2.5-flash';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -29,10 +41,10 @@ export default async function handler(req, res) {
     return;
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     res.status(500).json({
-      error: "The AI assistant isn't set up yet — add an ANTHROPIC_API_KEY environment variable in your Vercel project settings and redeploy.",
+      error: "The AI assistant isn't set up yet — add a GEMINI_API_KEY environment variable in your Vercel project settings and redeploy.",
     });
     return;
   }
@@ -54,28 +66,28 @@ Rules:
 FARM DATA (JSON):
 ${JSON.stringify(context || {})}`;
 
-  const messages = [
-    ...(Array.isArray(history) ? history.filter((m) => m && m.content).slice(-10) : []),
-    { role: 'user', content: question },
+  const contents = [
+    ...(Array.isArray(history) ? history.filter((m) => m && m.content).slice(-10) : [])
+      .map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
+    { role: 'user', parts: [{ text: question }] },
   ];
 
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        // Swap to 'claude-haiku-4-5-20251001' if you want faster/cheaper
-        // answers — plenty good for straightforward data lookups like these.
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1024,
-        system: systemPrompt,
-        messages,
-      }),
-    });
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey,
+        },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          contents,
+          generationConfig: { maxOutputTokens: 1024 },
+        }),
+      }
+    );
 
     const data = await response.json();
 
@@ -84,13 +96,24 @@ ${JSON.stringify(context || {})}`;
       return;
     }
 
-    const answer = (data.content || [])
-      .filter((block) => block.type === 'text')
-      .map((block) => block.text)
-      .join('\n')
-      .trim();
+    const candidate = (data.candidates || [])[0];
+    const answer = candidate
+      ? (candidate.content?.parts || []).map((p) => p.text || '').join('').trim()
+      : '';
 
-    res.status(200).json({ answer: answer || "I couldn't come up with an answer for that." });
+    if (!answer) {
+      // Most common cause: the response was blocked by a safety filter, or
+      // the free-tier rate limit was hit for the moment.
+      const reason = candidate?.finishReason || data?.promptFeedback?.blockReason;
+      res.status(200).json({
+        answer: reason === 'SAFETY' || reason === 'BLOCKED'
+          ? "I can't answer that one — try rephrasing the question."
+          : "I couldn't come up with an answer for that. Please try again.",
+      });
+      return;
+    }
+
+    res.status(200).json({ answer });
   } catch (err) {
     res.status(500).json({ error: 'Something went wrong talking to the AI service. Please try again.' });
   }
