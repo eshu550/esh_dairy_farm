@@ -28,6 +28,26 @@
 // list at https://ai.google.dev/gemini-api/docs/pricing
 const MODEL = 'gemini-3.8-flash';
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// The free tier occasionally returns 503 "model is overloaded" — this is
+// genuinely transient (Google says so in the message itself), so retry a
+// couple of times with a short, increasing delay before giving up.
+async function callGeminiWithRetry(url, options, attempts = 3) {
+  let lastResponse, lastData;
+  for (let i = 0; i < attempts; i++) {
+    const response = await fetch(url, options);
+    const data = await response.json();
+    if (response.ok) return { response, data };
+    lastResponse = response;
+    lastData = data;
+    const isOverloaded = response.status === 503 || response.status === 429;
+    if (!isOverloaded || i === attempts - 1) break;
+    await sleep(600 * (i + 1)); // 600ms, then 1200ms
+  }
+  return { response: lastResponse, data: lastData };
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
@@ -73,7 +93,7 @@ ${JSON.stringify(context || {})}`;
   ];
 
   try {
-    const response = await fetch(
+    const { response, data } = await callGeminiWithRetry(
       `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`,
       {
         method: 'POST',
@@ -89,10 +109,13 @@ ${JSON.stringify(context || {})}`;
       }
     );
 
-    const data = await response.json();
-
     if (!response.ok) {
-      res.status(response.status).json({ error: (data && data.error && data.error.message) || 'The AI service returned an error.' });
+      const isOverloaded = response.status === 503 || response.status === 429;
+      res.status(response.status).json({
+        error: isOverloaded
+          ? "The AI is getting a lot of requests right now — please try again in a minute."
+          : (data && data.error && data.error.message) || 'The AI service returned an error.',
+      });
       return;
     }
 
