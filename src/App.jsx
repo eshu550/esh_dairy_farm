@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo, useContext } from 'react';
 import {
   Home, Milk, HeartPulse, Stethoscope, Plus, ArrowLeft, X,
-  Calendar, Search, Check, ChevronRight, ChevronLeft, Trash2, Pencil, Droplet, Syringe, Printer, Download, Wheat, Baby, PackageMinus, PackagePlus, Upload, LogOut, Mail, Lock, Users, UserPlus, Eye, KeyRound, UserCircle, Wallet, TrendingUp, TrendingDown
+  Calendar, Search, Check, ChevronRight, ChevronLeft, Trash2, Pencil, Droplet, Syringe, Printer, Download, Wheat, Baby, PackageMinus, PackagePlus, Upload, LogOut, Mail, Lock, Users, UserPlus, Eye, KeyRound, UserCircle, Wallet, TrendingUp, TrendingDown,
+  Sparkles, Send
 } from 'lucide-react';
 import ReactDOM from 'react-dom';
 import { supabase, configMissing } from './supabaseClient.js';
@@ -91,6 +92,58 @@ const shiftMonth = (m, delta) => {
   const d = new Date(y, mo - 1 + delta, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 };
+function buildFarmContext({ cows, milk, heat, medical, financeEntries, feedTransactions, feedTypes, medicineTypes, medicineTransactions, farmName }) {
+  const cowLabel = (id) => {
+    const c = cows.find((x) => x.id === id);
+    return c ? `${c.name} (#${c.tagNumber})` : 'Unknown cow';
+  };
+  const feedName = (id) => (feedTypes.find((f) => f.id === id) || {}).name || 'Unknown feed';
+  const medName = (id) => (medicineTypes.find((m) => m.id === id) || {}).name || 'Unknown medicine';
+  const since90 = addDays(todayStr(), -90);
+
+  const milkMonthlyByCow = {};
+  milk.forEach((m) => {
+    const label = cowLabel(m.cowId);
+    const mo = m.date.slice(0, 7);
+    milkMonthlyByCow[label] = milkMonthlyByCow[label] || {};
+    milkMonthlyByCow[label][mo] = Math.round(((milkMonthlyByCow[label][mo] || 0) + Number(m.liters || 0)) * 100) / 100;
+  });
+
+  return {
+    farmName: farmName || 'the farm',
+    today: todayStr(),
+    animals: cows.map((c) => ({
+      name: c.name, tag: c.tagNumber, breed: c.breed, status: c.status,
+      gender: c.gender || undefined, dob: c.dob || undefined,
+      mother: c.motherCowId ? cowLabel(c.motherCowId) : undefined,
+      birthWeightKg: c.birthWeight !== '' ? c.birthWeight : undefined,
+      cycleLengthDays: c.cycleLength || undefined,
+      lastCalvingDate: c.calvingDate || undefined,
+      firstHeatAfterCalving: c.firstHeatDate || undefined,
+      lastInseminatedOn: c.inseminatedOn || undefined,
+      pregnant: (c.pregnancyConfirmed && c.inseminatedOn) || undefined,
+      expectedCalvingDate: (c.pregnancyConfirmed && c.inseminatedOn) ? addMonths(c.inseminatedOn, 9) : undefined,
+      mastitisAntibiotic: c.mastitisAntibiotic || undefined,
+      insured: c.insured || undefined,
+      insuranceStartDate: c.insured ? c.insuranceStartDate || undefined : undefined,
+      insuranceExpiryDate: c.insured ? c.insuranceExpiryDate || undefined : undefined,
+    })),
+    milk_monthly_totals_liters_by_cow: milkMonthlyByCow,
+    milk_entries_last_90_days: milk.filter((m) => m.date >= since90).map((m) => ({ cow: cowLabel(m.cowId), date: m.date, session: m.session, liters: m.liters })),
+    heat_records: heat.map((h) => ({ cow: cowLabel(h.cowId), date: h.date, bred: !!h.bred, notes: h.notes || undefined })),
+    health_records: medical.map((m) => ({
+      cow: cowLabel(m.cowId), date: m.date, type: m.type, medicine: m.medicine || undefined,
+      details: m.description || undefined, vet: m.vet || undefined,
+      nextDueDate: m.nextDueDate || undefined, completed: !!m.completed,
+    })),
+    feed_current_stock_bags: feedTypes.map((f) => ({ feed: f.name, stockBags: feedStock(f.id, feedTransactions) })),
+    feed_transactions: feedTransactions.map((t) => ({ feed: feedName(t.feedTypeId), date: t.date, kind: t.kind, bags: t.bags, cost: t.cost || undefined, notes: t.notes || undefined })),
+    medicine_current_stock: medicineTypes.map((m) => ({ medicine: m.name, stock: medicineStock(m.id, medicineTransactions) })),
+    medicine_transactions: medicineTransactions.map((t) => ({ medicine: medName(t.medicineTypeId), date: t.date, kind: t.kind, quantity: t.quantity, cost: t.cost || undefined, notes: t.notes || undefined })),
+    finance_entries: financeEntries.map((e) => ({ date: e.date, type: e.type, category: e.category, amount: e.amount, notes: e.notes || undefined })),
+  };
+}
+
 function MonthSwitcher({ month, onChange }) {
   const isCurrent = month === currentMonthStr();
   return (
@@ -899,6 +952,7 @@ export default function App() {
   const [openCowTab, setOpenCowTab] = useState(null);
   const openCowAt = (id, tabName) => { setOpenCowId(id); setOpenCowTab(tabName); };
   const [modal, setModal] = useState(null); // {type, cowId?, editId?}
+  const [askAI, setAskAI] = useState(null); // { focusCow } | null
   const [printJob, setPrintJob] = useState(null);
   const [restorePending, setRestorePending] = useState(null);
   const [restoreMsg, setRestoreMsg] = useState('');
@@ -1196,6 +1250,7 @@ export default function App() {
               }}
               onAddCalf={() => setModal({ type: 'cow', defaultStatus: 'calf', defaultMotherId: openCowId })}
               onOpenCow={setOpenCowId}
+              onAskAI={() => setAskAI({ focusCow: cowById(openCowId) })}
               onExport={(kind) => {
                 const cow = cowById(openCowId);
                 if (!cow) return;
@@ -1386,7 +1441,17 @@ export default function App() {
           )}
           </div>
 
+          {!openCowId && <AskAIFab onClick={() => setAskAI({ focusCow: null })} />}
           {!openCowId && <BottomNav tab={tab} setTab={setTab} />}
+
+          {askAI && (
+            <AskAIPanel
+              farmData={{ cows, milk, heat, medical, financeEntries, feedTransactions, feedTypes, medicineTypes, medicineTransactions }}
+              farmName={session?.user?.user_metadata?.farm_name}
+              focusCow={askAI.focusCow}
+              onClose={() => setAskAI(null)}
+            />
+          )}
 
           {modal && modal.type === 'cow' && (
             <CowForm
@@ -1653,6 +1718,131 @@ function BottomNav({ tab, setTab }) {
   );
 }
 
+function AskAIFab({ onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label="Ask AI about your farm"
+      className="ff-body"
+      style={{
+        position: 'absolute', right: 14, bottom: 78, zIndex: 25,
+        width: 50, height: 50, borderRadius: 25, border: 'none',
+        background: C.green, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        boxShadow: '0 4px 14px rgba(0,0,0,0.25)',
+      }}
+    >
+      <Sparkles size={21} />
+    </button>
+  );
+}
+
+function AskAIPanel({ farmData, farmName, focusCow, onClose }) {
+  const [messages, setMessages] = useState([]); // { role: 'user'|'assistant'|'error', text }
+  const [input, setInput] = useState(focusCow ? `About ${focusCow.name} (#${focusCow.tagNumber}): ` : '');
+  const [busy, setBusy] = useState(false);
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages, busy]);
+
+  const send = async () => {
+    const question = input.trim();
+    if (!question || busy) return;
+    const nextMessages = [...messages, { role: 'user', text: question }];
+    setMessages(nextMessages);
+    setInput('');
+    setBusy(true);
+    try {
+      const context = buildFarmContext({ ...farmData, farmName });
+      const history = nextMessages.slice(0, -1).slice(-10).map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.text }));
+      const res = await fetch('/api/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, context, history, focusCow: focusCow ? `${focusCow.name} (#${focusCow.tagNumber})` : null }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMessages((m) => [...m, { role: 'error', text: data.error || "Couldn't reach the AI service. Please try again." }]);
+      } else {
+        setMessages((m) => [...m, { role: 'assistant', text: data.answer || "I couldn't find an answer for that." }]);
+      }
+    } catch (e) {
+      setMessages((m) => [...m, { role: 'error', text: "Couldn't reach the AI service — check your connection and try again." }]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return ReactDOM.createPortal(
+    <div style={{ position: 'fixed', inset: 0, background: C.bg, zIndex: 1100, display: 'flex', justifyContent: 'center' }}>
+      <div style={{ width: '100%', maxWidth: 420, display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <div style={{ background: C.green, padding: '14px 16px', paddingTop: 'max(14px, env(safe-area-inset-top))', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+          <div style={{ width: 32, height: 32, borderRadius: 16, background: 'rgba(255,255,255,0.18)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Sparkles size={16} color="#fff" />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div className="ff-display" style={{ fontWeight: 700, fontSize: 15, color: '#fff' }}>Ask about your farm</div>
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.8)' }}>{focusCow ? `Focused on ${focusCow.name}` : 'Animals, health, milk & finance'}</div>
+          </div>
+          <button onClick={onClose} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: 10, padding: 8, display: 'flex' }}>
+            <X size={16} color="#fff" />
+          </button>
+        </div>
+
+        <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: 16, WebkitOverflowScrolling: 'touch' }}>
+          {messages.length === 0 && (
+            <div style={{ textAlign: 'center', color: C.sub, fontSize: 12.5, marginTop: 30, padding: '0 14px' }}>
+              Ask anything about your herd — e.g. "which cows are due for heat this week",
+              "how much milk did we get yesterday", "total expenses last month", or "is {focusCow ? focusCow.name : 'Ganga'} pregnant".
+            </div>
+          )}
+          {messages.map((m, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start', marginBottom: 10 }}>
+              <div
+                className="ff-body"
+                style={{
+                  maxWidth: '82%', borderRadius: 14, padding: '10px 13px', fontSize: 13.5, lineHeight: 1.45, whiteSpace: 'pre-wrap',
+                  background: m.role === 'user' ? C.green : m.role === 'error' ? C.rustSoft : '#fff',
+                  color: m.role === 'user' ? '#fff' : m.role === 'error' ? C.rust : C.ink,
+                  border: m.role === 'assistant' ? `1px solid ${C.line}` : 'none',
+                }}
+              >
+                {m.text}
+              </div>
+            </div>
+          ))}
+          {busy && (
+            <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: 10 }}>
+              <div style={{ background: '#fff', border: `1px solid ${C.line}`, borderRadius: 14, padding: '10px 13px', fontSize: 13, color: C.sub }}>Thinking…</div>
+            </div>
+          )}
+        </div>
+
+        <div style={{ flexShrink: 0, borderTop: `1px solid ${C.line}`, background: '#fff', padding: 10, paddingBottom: 'max(10px, calc(env(safe-area-inset-bottom) + 6px))', display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+            placeholder="Ask about your animals, health, milk, or finances…"
+            rows={1}
+            className="ff-body"
+            style={{ flex: 1, resize: 'none', maxHeight: 90, border: `1.5px solid ${C.line}`, borderRadius: 12, padding: '10px 12px', fontSize: 13.5, outline: 'none', fontFamily: 'inherit' }}
+          />
+          <button
+            onClick={send}
+            disabled={busy || !input.trim()}
+            style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 20, border: 'none', background: C.green, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: busy || !input.trim() ? 0.5 : 1 }}
+          >
+            <Send size={16} />
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 // ---------- Home ----------
 function HomeScreen({ cows, milkToday, heatAlerts, medDue, insemAlerts, insuranceAlerts, onOpenCow, onOpenCowTab, onGoTab, onBackup, onRestore, onOpenProfile, farmName, userEmail }) {
   const { isReadOnly } = useContext(RoleContext);
@@ -1881,7 +2071,7 @@ function CowsScreen({ cows, heatStatusFor, onOpenCow, onAddCow, onAddCalf, onExp
 }
 
 // ---------- Cow detail ----------
-function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus, initialTab, onBack, onEdit, onDelete, onAddMilk, onAddHeat, onAddMedical, onEditMedical, onDeleteMedical, onAddCalf, onOpenCow, onEditHeat, onDeleteHeat, onToggleMedComplete, onExport }) {
+function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus, initialTab, onBack, onEdit, onDelete, onAddMilk, onAddHeat, onAddMedical, onEditMedical, onDeleteMedical, onAddCalf, onOpenCow, onEditHeat, onDeleteHeat, onToggleMedComplete, onExport, onAskAI }) {
   const { isReadOnly } = useContext(RoleContext);
   const [sub, setSub] = useState(initialTab || (['calf', 'heifer'].includes(cow?.status) ? 'health' : 'milk'));
   useEffect(() => {
@@ -1905,12 +2095,15 @@ function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus,
         subtitle={`Tag #${cow.tagNumber} · ${cow.breed}`}
         onBack={onBack}
         right={
-          !isReadOnly && (
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button onClick={onEdit} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: 10, padding: 8, minWidth: 34, minHeight: 34, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Pencil size={15} color="#fff" /></button>
-              <button onClick={() => setConfirmDel(true)} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: 10, padding: 8, minWidth: 34, minHeight: 34, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Trash2 size={15} color="#fff" /></button>
-            </div>
-          )
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button onClick={onAskAI} title="Ask AI about this animal" style={{ background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: 10, padding: 8, minWidth: 34, minHeight: 34, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Sparkles size={15} color="#fff" /></button>
+            {!isReadOnly && (
+              <>
+                <button onClick={onEdit} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: 10, padding: 8, minWidth: 34, minHeight: 34, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Pencil size={15} color="#fff" /></button>
+                <button onClick={() => setConfirmDel(true)} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: 10, padding: 8, minWidth: 34, minHeight: 34, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Trash2 size={15} color="#fff" /></button>
+              </>
+            )}
+          </div>
         }
       />
       <div style={{ padding: 16 }}>
