@@ -3360,50 +3360,13 @@ function HeatForm({ cows, defaultCowId, initial, onClose, onSave }) {
   );
 }
 
-function CowMultiPicker({ cows, selected, onChange }) {
-  const allSelected = cows.length > 0 && selected.length === cows.length;
-  const toggleAll = () => onChange(allSelected ? [] : cows.map((c) => c.id));
-  const toggleOne = (id) => onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
-  return (
-    <Field label={`Cows ${selected.length ? `(${selected.length} selected)` : ''}`}>
-      <button
-        type="button"
-        onClick={toggleAll}
-        className="ff-body"
-        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, border: `1.5px solid ${allSelected ? C.green : C.line}`, background: allSelected ? C.greenSoft : '#fff', borderRadius: 10, padding: '9px 12px', marginBottom: 8, fontWeight: 700, fontSize: 12.5, color: allSelected ? C.green : C.ink }}
-      >
-        <div style={{ width: 18, height: 18, borderRadius: 5, border: `1.5px solid ${allSelected ? C.green : C.grey}`, background: allSelected ? C.green : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          {allSelected && <Check size={12} color="#fff" />}
-        </div>
-        Select all {cows.length} cow{cows.length === 1 ? '' : 's'}
-      </button>
-      <div style={{ maxHeight: 220, overflowY: 'auto', border: `1.5px solid ${C.line}`, borderRadius: 10, background: '#fff' }}>
-        {cows.map((c) => {
-          const checked = selected.includes(c.id);
-          return (
-            <button
-              type="button"
-              key={c.id}
-              onClick={() => toggleOne(c.id)}
-              className="ff-body"
-              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, border: 'none', borderBottom: `1px solid ${C.line}`, background: checked ? C.greenSoft : '#fff', padding: '10px 12px', textAlign: 'left' }}
-            >
-              <div style={{ width: 18, height: 18, borderRadius: 5, border: `1.5px solid ${checked ? C.green : C.grey}`, background: checked ? C.green : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                {checked && <Check size={12} color="#fff" />}
-              </div>
-              <span style={{ fontSize: 13, color: C.ink, fontWeight: 600 }}>{c.name}</span>
-              <span style={{ fontSize: 11.5, color: C.sub }}>#{c.tagNumber}</span>
-            </button>
-          );
-        })}
-      </div>
-    </Field>
-  );
-}
-
 function MedicalForm({ cows, defaultCowId, initial, onClose, onSave }) {
   const fixedCowId = initial?.cowId || defaultCowId;
-  const [cowIds, setCowIds] = useState(fixedCowId ? [fixedCowId] : []);
+  const ALL_COWS = '__all__';
+  const [cowSelection, setCowSelection] = useState(fixedCowId || '');
+  // Sold animals shouldn't be picked up by "All cows" (e.g. when vaccinating the herd)
+  const selectable = cows.filter((c) => c.status !== 'sold');
+  const cowIds = cowSelection === ALL_COWS ? selectable.map((c) => c.id) : cowSelection ? [cowSelection] : [];
   const [date, setDate] = useState(initial?.date || todayStr());
   const [type, setType] = useState(initial?.type || MED_TYPES[0]);
   const [medicine, setMedicine] = useState(initial?.medicine || '');
@@ -3414,7 +3377,20 @@ function MedicalForm({ cows, defaultCowId, initial, onClose, onSave }) {
   const cow = fixedCowId ? cows.find((c) => c.id === fixedCowId) : null;
   return (
     <Modal title={initial ? 'Edit Health Record' : 'Add Health Record'} onClose={onClose}>
-      {!fixedCowId && <CowMultiPicker cows={cows} selected={cowIds} onChange={setCowIds} />}
+      {!fixedCowId && (
+        <Field label="Cow">
+          <select value={cowSelection} onChange={(e) => setCowSelection(e.target.value)} style={inputStyle}>
+            <option value="" disabled>Select a cow</option>
+            {selectable.length > 1 && <option value={ALL_COWS}>All cows ({selectable.length})</option>}
+            {selectable.map((c) => <option key={c.id} value={c.id}>{c.name} (#{c.tagNumber})</option>)}
+          </select>
+          {cowSelection === ALL_COWS && (
+            <div className="ff-body" style={{ fontSize: 11.5, color: C.sub, marginTop: 6 }}>
+              A separate record will be saved for each of the {selectable.length} cows.
+            </div>
+          )}
+        </Field>
+      )}
       {cow && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
           <EarTag number={cow.tagNumber} size="sm" />
