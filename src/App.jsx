@@ -12,34 +12,40 @@ import { supabase, configMissing } from './supabaseClient.js';
 const RoleContext = React.createContext({ role: 'owner', isReadOnly: false });
 
 const C = {
-  bg: '#EEF0E6',
+  bg: '#F5F5F7',
   card: '#FFFFFF',
-  ink: '#20281F',
-  sub: '#6E6C60',
-  line: '#E2DFCF',
-  green: '#2F4A3A',
-  greenDark: '#1C2E22',
-  greenSoft: '#DCE6DA',
-  brown: '#93602F',
-  brownSoft: '#EFE0CC',
-  rust: '#B8462F',
-  rustSoft: '#F5DCD3',
-  milk: '#3E7C93',
-  milkSoft: '#DCEAEF',
-  amber: '#C08A2E',
-  amberSoft: '#F3E5C8',
-  grey: '#8B8778',
-  greySoft: '#E8E6DA',
+  ink: '#1C1C1C',
+  sub: '#6B6B6B',
+  line: '#E6E6EA',
+  brand: '#E23744',
+  brandDark: '#C81E2D',
+  brandSoft: '#FDECEE',
+  green: '#1E9E50',
+  greenDark: '#157A3B',
+  greenSoft: '#E3F5EA',
+  brown: '#A5652B',
+  brownSoft: '#F7EBDC',
+  rust: '#D93636',
+  rustSoft: '#FDE8E8',
+  milk: '#2F7DF6',
+  milkSoft: '#E6F0FE',
+  amber: '#B76E00',
+  amberSoft: '#FFF1D6',
+  grey: '#8A8A93',
+  greySoft: '#F0F0F3',
+  shadow: '0 1px 2px rgba(0,0,0,0.04), 0 6px 18px rgba(0,0,0,0.06)',
 };
 
 const FONTS = (
   <style>{`
-    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap');
     html, body, #root { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; }
     .app-shell { height: 100vh; height: 100dvh; }
-    .ff-display { font-family: 'Space Grotesk', sans-serif; }
+    .ff-display { font-family: 'Plus Jakarta Sans', 'Inter', sans-serif; font-weight: 800 !important; letter-spacing: -0.01em; }
     .ff-body { font-family: 'Inter', sans-serif; }
     * { -webkit-tap-highlight-color: transparent; }
+    button { font-family: 'Inter', sans-serif; cursor: pointer; }
+    button:active { transform: scale(0.98); }
     ::-webkit-scrollbar { display: none; }
     .print-area { display: none; }
     @media print {
@@ -153,7 +159,7 @@ function MonthSwitcher({ month, onChange }) {
       </button>
       <label style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#fff', border: `1.5px solid ${C.line}`, borderRadius: 10, padding: '8px 10px', cursor: 'pointer' }}>
         <Calendar size={14} color={C.sub} />
-        <span className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{monthLabel(month)}</span>
+        <span className="ff-display" style={{ fontWeight: 700, fontSize: 14.5, color: C.ink }}>{monthLabel(month)}</span>
         <input
           type="month"
           value={month}
@@ -165,7 +171,7 @@ function MonthSwitcher({ month, onChange }) {
         <ChevronRight size={16} />
       </button>
       {!isCurrent && (
-        <button onClick={() => onChange(currentMonthStr())} className="ff-body" style={{ flexShrink: 0, background: C.greenSoft, color: C.green, border: 'none', borderRadius: 10, padding: '8px 10px', fontSize: 12, fontWeight: 700 }}>
+        <button onClick={() => onChange(currentMonthStr())} className="ff-body" style={{ flexShrink: 0, background: C.brandSoft, color: C.brand, border: 'none', borderRadius: 10, padding: '8px 10px', fontSize: 13, fontWeight: 700 }}>
           Today
         </button>
       )}
@@ -256,49 +262,16 @@ function CowIcon({ size = 20, color = 'currentColor', strokeWidth = 2 }) {
 }
 
 function EarTag({ number, tone = 'green', size = 'md' }) {
-  const tones = {
-    green: { bg: C.greenSoft, fg: C.green },
-    brown: { bg: C.brownSoft, fg: C.brown },
-    grey: { bg: C.greySoft, fg: C.grey },
-    amber: { bg: C.amberSoft, fg: C.amber },
-    blue: { bg: C.milkSoft, fg: C.milk },
-  };
-  const t = tones[tone] || tones.green;
-  const dims = size === 'lg' ? { w: 72, h: 56, fs: 20 } : size === 'sm' ? { w: 40, h: 32, fs: 11 } : { w: 52, h: 40, fs: 14 };
+  const status = { green: 'active', brown: 'dry', amber: 'calf', blue: 'heifer', grey: 'sold' }[tone] || 'active';
+  const dim = size === 'lg' ? 76 : size === 'sm' ? 54 : 62;
   const numStr = number == null ? '' : String(number);
   const displayNum = numStr.length > 3 ? numStr.slice(-3) : numStr;
   return (
-    <div
-      style={{
-        position: 'relative',
-        width: dims.w,
-        height: dims.h,
-        background: t.bg,
-        borderRadius: 8,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        flexShrink: 0,
-        border: `1.5px solid ${t.fg}22`,
-      }}
-      title={numStr.length > 3 ? `Tag #${numStr}` : undefined}
-    >
-      <div
-        style={{
-          position: 'absolute',
-          top: -4,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          width: 8,
-          height: 8,
-          borderRadius: '50%',
-          background: C.bg,
-          border: `1.5px solid ${t.fg}33`,
-        }}
-      />
-      <span className="ff-display" style={{ color: t.fg, fontWeight: 700, fontSize: dims.fs, letterSpacing: 0.5 }}>
+    <div style={{ position: 'relative', width: dim, height: dim, flexShrink: 0 }} title={numStr.length > 3 ? `Tag #${numStr}` : undefined}>
+      <CowAvatar size={dim} status={status} radius={Math.round(dim * 0.28)} />
+      <div className="ff-display" style={{ position: 'absolute', right: -6, bottom: -6, background: C.ink, color: '#fff', fontSize: size === 'sm' ? 10 : 11.5, lineHeight: 1, padding: '2px 5px', borderRadius: 6, border: '2px solid #fff' }}>
         {displayNum}
-      </span>
+      </div>
     </div>
   );
 }
@@ -317,7 +290,7 @@ function StatusPill({ status }) {
   return (
     <span
       className="ff-body"
-      style={{ background: s.bg, color: s.fg, fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 999 }}
+      style={{ background: s.bg, color: s.fg, fontSize: 12.5, fontWeight: 700, padding: '4px 10px', borderRadius: 8 }}
     >
       {s.label}
     </span>
@@ -326,7 +299,7 @@ function StatusPill({ status }) {
 
 function Chip({ children, bg, fg }) {
   return (
-    <span className="ff-body" style={{ background: bg, color: fg, fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 999 }}>
+    <span className="ff-body" style={{ background: bg, color: fg, fontSize: 12.5, fontWeight: 700, padding: '4px 10px', borderRadius: 8, display: 'inline-block', lineHeight: 1.35, maxWidth: '100%' }}>
       {children}
     </span>
   );
@@ -334,7 +307,7 @@ function Chip({ children, bg, fg }) {
 
 function PrintTable({ headers, rows }) {
   return (
-    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 10 }}>
+    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, marginBottom: 10 }}>
       <thead>
         <tr>{headers.map((h, i) => <th key={i} style={{ textAlign: 'left', borderBottom: '1.5px solid #333', padding: '6px 8px' }}>{h}</th>)}</tr>
       </thead>
@@ -356,8 +329,8 @@ function CowPrintBody({ job }) {
   return (
     <div>
       <div style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 15, fontWeight: 700 }}>{cow.name} — Tag #{cow.tagNumber}</div>
-        <div style={{ fontSize: 12, color: '#444', marginTop: 4, lineHeight: 1.6 }}>
+        <div style={{ fontSize: 16, fontWeight: 700 }}>{cow.name} — Tag #{cow.tagNumber}</div>
+        <div style={{ fontSize: 13, color: '#444', marginTop: 4, lineHeight: 1.6 }}>
           Breed: {cow.breed} &nbsp;·&nbsp; DOB: {fmtDate(cow.dob)} &nbsp;·&nbsp; Status: {cow.status}<br />
           {cow.calvingDate && <>Last calving: {fmtDate(cow.calvingDate)} &nbsp;·&nbsp; </>}
           {cow.firstHeatDate && <>First heat: {fmtDate(cow.firstHeatDate)} &nbsp;·&nbsp; </>}
@@ -369,24 +342,24 @@ function CowPrintBody({ job }) {
       </div>
       {milkRows.length > 0 && (
         <>
-          <div style={{ fontWeight: 700, fontSize: 13, margin: '14px 0 6px' }}>Milk Records</div>
+          <div style={{ fontWeight: 700, fontSize: 14, margin: '14px 0 6px' }}>Milk Records</div>
           <PrintTable headers={['Date', 'Session', 'Liters']} rows={milkRows} />
         </>
       )}
       {heatRows.length > 0 && (
         <>
-          <div style={{ fontWeight: 700, fontSize: 13, margin: '14px 0 6px' }}>Heat Cycle Records</div>
+          <div style={{ fontWeight: 700, fontSize: 14, margin: '14px 0 6px' }}>Heat Cycle Records</div>
           <PrintTable headers={['Date', 'Bred', 'Notes']} rows={heatRows} />
         </>
       )}
       {medRows.length > 0 && (
         <>
-          <div style={{ fontWeight: 700, fontSize: 13, margin: '14px 0 6px' }}>Health Records</div>
+          <div style={{ fontWeight: 700, fontSize: 14, margin: '14px 0 6px' }}>Health Records</div>
           <PrintTable headers={['Date', 'Type', 'Medicine', 'Details', 'Vet', 'Next Due']} rows={medRows} />
         </>
       )}
       {milkRows.length === 0 && heatRows.length === 0 && medRows.length === 0 && (
-        <div style={{ fontSize: 12, color: '#777', marginTop: 10 }}>No records logged for this cow yet.</div>
+        <div style={{ fontSize: 13, color: '#777', marginTop: 10 }}>No records logged for this cow yet.</div>
       )}
     </div>
   );
@@ -397,16 +370,16 @@ function PrintDocument({ job }) {
   return (
     <div style={{ padding: 28, fontFamily: 'Inter, sans-serif', color: '#111' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', borderBottom: '2px solid #222', paddingBottom: 8, marginBottom: 18 }}>
-        <div style={{ fontSize: 20, fontWeight: 700 }}>{job.title}</div>
-        <div style={{ fontSize: 11, color: '#555' }}>Generated {fmtDate(todayStr())}</div>
+        <div style={{ fontSize: 22, fontWeight: 700 }}>{job.title}</div>
+        <div style={{ fontSize: 12.5, color: '#555' }}>Generated {fmtDate(todayStr())}</div>
       </div>
       {job.type === 'cow' ? (
         <CowPrintBody job={job} />
       ) : job.type === 'feed' ? (
         <>
-          <div style={{ fontWeight: 700, fontSize: 13, margin: '0 0 6px' }}>Summary</div>
+          <div style={{ fontWeight: 700, fontSize: 14, margin: '0 0 6px' }}>Summary</div>
           <PrintTable headers={job.summaryHeaders} rows={job.summaryRows} />
-          <div style={{ fontWeight: 700, fontSize: 13, margin: '14px 0 6px' }}>Transactions</div>
+          <div style={{ fontWeight: 700, fontSize: 14, margin: '14px 0 6px' }}>Transactions</div>
           <PrintTable headers={job.txnHeaders} rows={job.txnRows} />
         </>
       ) : (
@@ -488,27 +461,28 @@ async function fetchTable(table, mapper, orderCol) {
 // ---------- Generic UI atoms ----------
 function HeaderIconButton({ icon, onClick, title }) {
   return (
-    <button onClick={onClick} title={title} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: 10, padding: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 34, minHeight: 34, flexShrink: 0 }}>
+    <button onClick={onClick} title={title} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: 12, padding: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 38, minHeight: 38, flexShrink: 0 }}>
       {icon}
     </button>
   );
 }
 
-function ScreenHeader({ title, subtitle, onBack, right }) {
+function ScreenHeader({ title, subtitle, onBack, right, children }) {
   return (
-    <div style={{ background: C.green, color: '#fff', padding: '18px 18px 16px', paddingTop: 'max(18px, calc(env(safe-area-inset-top) + 12px))' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+    <div style={{ background: `linear-gradient(135deg, ${C.brand} 0%, ${C.brandDark} 100%)`, color: '#fff', padding: '18px 18px 20px', paddingTop: 'max(18px, calc(env(safe-area-inset-top) + 12px))', borderRadius: '0 0 28px 28px', boxShadow: '0 10px 24px rgba(226,55,68,0.22)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         {onBack && (
-          <button onClick={onBack} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: 10, padding: 8, display: 'flex', minWidth: 34, minHeight: 34, alignItems: 'center', justifyContent: 'center' }}>
-            <ArrowLeft size={18} color="#fff" />
+          <button onClick={onBack} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: 12, padding: 8, display: 'flex', minWidth: 38, minHeight: 38, alignItems: 'center', justifyContent: 'center' }}>
+            <ArrowLeft size={20} color="#fff" />
           </button>
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div className="ff-display" style={{ fontSize: 19, fontWeight: 700 }}>{title}</div>
-          {subtitle && <div className="ff-body" style={{ fontSize: 12.5, opacity: 0.75, marginTop: 1 }}>{subtitle}</div>}
+          <div className="ff-display" style={{ fontSize: 24, lineHeight: 1.15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</div>
+          {subtitle && <div className="ff-body" style={{ fontSize: 14, opacity: 0.9, marginTop: 3, fontWeight: 500 }}>{subtitle}</div>}
         </div>
         {right}
       </div>
+      {children}
     </div>
   );
 }
@@ -521,22 +495,22 @@ function FAB({ onClick, label }) {
       onClick={onClick}
       className="ff-body"
       style={{
-        position: 'absolute', right: 18, bottom: 88, background: C.green, color: '#fff',
-        border: 'none', borderRadius: 999, padding: '13px 18px', display: 'flex', alignItems: 'center', gap: 6,
-        fontWeight: 600, fontSize: 13.5, boxShadow: '0 8px 20px rgba(47,74,58,0.35)', zIndex: 20,
+        position: 'absolute', right: 16, bottom: 90, background: C.brand, color: '#fff',
+        border: 'none', borderRadius: 16, padding: '14px 20px', display: 'flex', alignItems: 'center', gap: 8,
+        fontWeight: 700, fontSize: 16, boxShadow: '0 10px 22px rgba(226,55,68,0.4)', zIndex: 20,
       }}
     >
-      <Plus size={16} /> {label}
+      <Plus size={19} strokeWidth={2.6} /> {label}
     </button>
   );
 }
 
 function EmptyState({ icon, title, subtitle, action }) {
   return (
-    <div style={{ textAlign: 'center', padding: '48px 24px', color: C.sub }}>
-      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12, color: C.grey }}>{icon}</div>
-      <div className="ff-display" style={{ color: C.ink, fontWeight: 700, fontSize: 15.5, marginBottom: 4 }}>{title}</div>
-      <div className="ff-body" style={{ fontSize: 13, lineHeight: 1.5 }}>{subtitle}</div>
+    <div style={{ textAlign: 'center', padding: '40px 24px', color: C.sub }}>
+      <div style={{ width: 84, height: 84, borderRadius: 42, background: C.brandSoft, color: C.brand, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>{icon}</div>
+      <div className="ff-display" style={{ color: C.ink, fontSize: 19, marginBottom: 6 }}>{title}</div>
+      <div className="ff-body" style={{ fontSize: 15, lineHeight: 1.5 }}>{subtitle}</div>
       {action}
     </div>
   );
@@ -544,29 +518,30 @@ function EmptyState({ icon, title, subtitle, action }) {
 
 function Field({ label, children }) {
   return (
-    <div style={{ marginBottom: 14 }}>
-      <div className="ff-body" style={{ fontSize: 12, fontWeight: 600, color: C.sub, marginBottom: 6 }}>{label}</div>
+    <div style={{ marginBottom: 16 }}>
+      <div className="ff-body" style={{ fontSize: 14, fontWeight: 700, color: C.ink, marginBottom: 7 }}>{label}</div>
       {children}
     </div>
   );
 }
 
 const inputStyle = {
-  width: '100%', border: `1.5px solid ${C.line}`, borderRadius: 10, padding: '10px 12px',
-  fontSize: 14, fontFamily: 'Inter, sans-serif', color: C.ink, background: '#fff', outline: 'none', boxSizing: 'border-box',
+  width: '100%', border: `1.5px solid ${C.line}`, borderRadius: 12, padding: '12px 14px',
+  fontSize: 16, fontFamily: 'Inter, sans-serif', color: C.ink, background: '#fff', outline: 'none', boxSizing: 'border-box',
 };
 
 function Modal({ title, onClose, children }) {
   return ReactDOM.createPortal(
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(28,46,34,0.45)', zIndex: 1000, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={onClose}>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={onClose}>
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{ background: C.bg, width: '100%', maxWidth: 420, maxHeight: '86%', overflowY: 'auto', borderRadius: '20px 20px 0 0', padding: 18, paddingBottom: 'max(18px, calc(env(safe-area-inset-bottom) + 14px))' }}
+        style={{ background: '#fff', width: '100%', maxWidth: 420, maxHeight: '90%', overflowY: 'auto', borderRadius: '26px 26px 0 0', padding: '10px 20px 20px', paddingBottom: 'max(20px, calc(env(safe-area-inset-bottom) + 14px))' }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 14 }}>
-          <div className="ff-display" style={{ fontWeight: 700, fontSize: 16.5, color: C.ink, flex: 1 }}>{title}</div>
-          <button onClick={onClose} style={{ background: C.greySoft, border: 'none', borderRadius: 8, padding: 6 }}>
-            <X size={16} color={C.ink} />
+        <div style={{ width: 44, height: 5, borderRadius: 3, background: '#D9D9DE', margin: '0 auto 14px' }} />
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
+          <div className="ff-display" style={{ fontSize: 21, color: C.ink, flex: 1 }}>{title}</div>
+          <button onClick={onClose} style={{ background: C.greySoft, border: 'none', borderRadius: 18, width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <X size={18} color={C.ink} />
           </button>
         </div>
         {children}
@@ -583,8 +558,9 @@ function PrimaryButton({ children, onClick, disabled, danger }) {
       disabled={disabled}
       className="ff-body"
       style={{
-        width: '100%', background: danger ? C.rust : C.green, color: '#fff', border: 'none', borderRadius: 12,
-        padding: '12px 0', fontWeight: 700, fontSize: 14.5, opacity: disabled ? 0.5 : 1, marginTop: 4,
+        width: '100%', background: danger ? '#B42318' : C.brand, color: '#fff', border: 'none', borderRadius: 14,
+        padding: '15px 0', fontWeight: 700, fontSize: 17, opacity: disabled ? 0.45 : 1, marginTop: 6,
+        boxShadow: disabled ? 'none' : (danger ? '0 8px 16px rgba(180,35,24,0.28)' : '0 8px 16px rgba(226,55,68,0.3)'),
       }}
     >
       {children}
@@ -595,23 +571,131 @@ function PrimaryButton({ children, onClick, disabled, danger }) {
 // ---------- Segmented select ----------
 function Segmented({ options, value, onChange, labels }) {
   return (
-    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
       {options.map((opt) => (
         <button
           key={opt}
           onClick={() => onChange(opt)}
           className="ff-body"
           style={{
-            border: `1.5px solid ${value === opt ? C.green : C.line}`,
-            background: value === opt ? C.greenSoft : '#fff',
-            color: value === opt ? C.green : C.sub,
-            borderRadius: 999, padding: '7px 13px', fontSize: 12.5, fontWeight: 600,
+            border: `1.5px solid ${value === opt ? C.brand : C.line}`,
+            background: value === opt ? C.brandSoft : '#fff',
+            color: value === opt ? C.brand : C.ink,
+            borderRadius: 12, padding: '8px 15px', fontSize: 14.5, fontWeight: 600,
           }}
         >
           {labels?.[opt] ?? opt}
         </button>
       ))}
     </div>
+  );
+}
+
+// ---------- Illustrations ----------
+function CowFace({ size = 64, calf = false }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100" aria-hidden="true" style={{ display: 'block' }}>
+      <ellipse cx="15" cy="43" rx="13" ry="7.5" transform="rotate(-22 15 43)" fill="#fff" />
+      <ellipse cx="15" cy="43" rx="7.5" ry="4" transform="rotate(-22 15 43)" fill="#F4B6B0" />
+      <ellipse cx="85" cy="43" rx="13" ry="7.5" transform="rotate(22 85 43)" fill="#fff" />
+      <ellipse cx="85" cy="43" rx="7.5" ry="4" transform="rotate(22 85 43)" fill="#F4B6B0" />
+      {!calf && (
+        <>
+          <path d="M34 26 C29 15 24 12 19 14 C25 17 28 23 30 30 Z" fill="#EBD9A8" />
+          <path d="M66 26 C71 15 76 12 81 14 C75 17 72 23 70 30 Z" fill="#EBD9A8" />
+        </>
+      )}
+      <path d="M50 18 C71 18 79 33 77 52 C76 67 66 80 50 80 C34 80 24 67 23 52 C21 33 29 18 50 18 Z" fill="#fff" />
+      <path d="M50 18 C61 18 71 24 75 35 C67 32 59 35 57 44 C52 37 47 28 50 18 Z" fill="#3A3A3C" />
+      <ellipse cx="50" cy="69" rx="20" ry="13.5" fill="#F7BDB5" />
+      <ellipse cx="42.5" cy="69" rx="3.2" ry="4.2" fill="#D9827B" />
+      <ellipse cx="57.5" cy="69" rx="3.2" ry="4.2" fill="#D9827B" />
+      <circle cx="38" cy="50" r="4" fill="#1C1C1C" />
+      <circle cx="62" cy="50" r="4" fill="#1C1C1C" />
+      <circle cx="39.3" cy="48.6" r="1.3" fill="#fff" />
+      <circle cx="63.3" cy="48.6" r="1.3" fill="#fff" />
+    </svg>
+  );
+}
+
+const AVATAR_BG = { active: '#FFE8DC', dry: '#F6E9D8', calf: '#FFF0C7', heifer: '#E0ECFF', sold: '#ECECEF' };
+
+function CowAvatar({ size = 64, status = 'active', radius = 16 }) {
+  return (
+    <div style={{ width: size, height: size, borderRadius: radius, background: AVATAR_BG[status] || AVATAR_BG.active, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
+      <CowFace size={Math.round(size * 0.88)} calf={status === 'calf'} />
+    </div>
+  );
+}
+
+// Cow picture with the ear-tag number as a small badge underneath (like a rating badge on a restaurant card)
+function CowThumb({ cow, size = 78 }) {
+  const tag = String(cow.tagNumber ?? '');
+  const shown = tag.length > 6 ? '…' + tag.slice(-4) : tag;
+  return (
+    <div style={{ position: 'relative', flexShrink: 0, marginBottom: 9 }}>
+      <CowAvatar size={size} status={cow.status} radius={Math.round(size * 0.22)} />
+      <div className="ff-display" style={{ position: 'absolute', left: '50%', bottom: -10, transform: 'translateX(-50%)', background: C.ink, color: '#fff', fontSize: 12.5, padding: '2px 9px', borderRadius: 8, border: '2px solid #fff', whiteSpace: 'nowrap' }}>
+        #{shown}
+      </div>
+    </div>
+  );
+}
+
+function MilkBottle({ size = 46 }) {
+  return (
+    <svg width={size} height={Math.round(size * 1.5)} viewBox="0 0 60 90" aria-hidden="true" style={{ display: 'block' }}>
+      <rect x="21" y="3" width="18" height="10" rx="3" fill="#8F1420" />
+      <path d="M22 13 H38 V22 C38 26 48 30 48 40 V80 C48 85 45 88 40 88 H20 C15 88 12 85 12 80 V40 C12 30 22 26 22 22 Z" fill="#fff" />
+      <rect x="12" y="46" width="36" height="24" fill="#FDECEE" />
+      <text x="30" y="63" textAnchor="middle" fontSize="12" fontWeight="800" fill="#E23744" fontFamily="Plus Jakarta Sans, Inter, sans-serif">MILK</text>
+    </svg>
+  );
+}
+
+function PastureScene({ height = 150 }) {
+  return (
+    <svg viewBox="0 0 360 170" preserveAspectRatio="xMidYMid slice" width="100%" height={height} aria-hidden="true" style={{ display: 'block' }}>
+      <defs>
+        <linearGradient id="pgSky" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#FFC9BC" />
+          <stop offset="1" stopColor="#FFF4E3" />
+        </linearGradient>
+      </defs>
+      <rect width="360" height="170" fill="url(#pgSky)" />
+      <circle cx="292" cy="46" r="34" fill="#FFC857" opacity="0.28" />
+      <circle cx="292" cy="46" r="21" fill="#FFC857" />
+      <ellipse cx="72" cy="34" rx="26" ry="8" fill="#fff" opacity="0.9" />
+      <ellipse cx="94" cy="28" rx="18" ry="7" fill="#fff" opacity="0.9" />
+      <ellipse cx="206" cy="22" rx="22" ry="6.5" fill="#fff" opacity="0.8" />
+      <path d="M0 108 C50 84 100 88 150 104 C200 120 250 88 360 100 L360 170 L0 170 Z" fill="#B7DDA9" />
+      <g transform="translate(34 70)">
+        <rect x="0" y="20" width="64" height="48" fill="#D94452" />
+        <path d="M-7 22 L32 0 L71 22 Z" fill="#B5303E" />
+        <rect x="22" y="38" width="20" height="30" fill="#fff" />
+        <path d="M22 38 L42 68 M42 38 L22 68" stroke="#D94452" strokeWidth="3" />
+      </g>
+      <path d="M0 134 C60 114 120 122 180 136 C240 150 300 120 360 128 L360 170 L0 170 Z" fill="#7CC47F" />
+      <g transform="translate(196 92)">
+        <path d="M2 18 C-6 22 -5 34 -2 40" stroke="#3A3A3C" strokeWidth="3" fill="none" strokeLinecap="round" />
+        <rect x="2" y="12" width="52" height="26" rx="12" fill="#fff" />
+        <path d="M10 14 C18 9 25 16 22 26 C15 29 7 25 10 14 Z" fill="#3A3A3C" />
+        <path d="M32 20 C39 15 48 20 45 31 C39 33 32 29 32 20 Z" fill="#3A3A3C" />
+        <rect x="8" y="34" width="7" height="18" rx="3" fill="#fff" />
+        <rect x="19" y="34" width="7" height="18" rx="3" fill="#F2F2F2" />
+        <rect x="35" y="34" width="7" height="18" rx="3" fill="#fff" />
+        <rect x="46" y="34" width="7" height="18" rx="3" fill="#F2F2F2" />
+        <ellipse cx="62" cy="17" rx="12" ry="10" fill="#fff" />
+        <ellipse cx="69" cy="22" rx="7" ry="5.5" fill="#F7BDB5" />
+        <circle cx="62" cy="13" r="2.2" fill="#1C1C1C" />
+        <ellipse cx="54" cy="8" rx="5" ry="3" fill="#F4B6B0" transform="rotate(-25 54 8)" />
+        <path d="M58 7 C57 2 55 0 52 0 C54 3 55 5 56 9 Z" fill="#EBD9A8" />
+      </g>
+      <path d="M0 156 C70 146 140 160 220 152 C280 146 330 156 360 150 L360 170 L0 170 Z" fill="#5DB268" />
+      <g stroke="#fff" strokeWidth="2.4" strokeLinecap="round" opacity="0.9">
+        <path d="M262 150 V132 M280 150 V130 M298 150 V131 M316 150 V132 M254 138 H324 M254 146 H324" />
+      </g>
+    </svg>
   );
 }
 
@@ -661,7 +745,7 @@ function ManageAccessModal({ ownerId, onClose }) {
 
   return (
     <Modal title="Manage Access" onClose={onClose}>
-      <div className="ff-body" style={{ fontSize: 12.5, color: C.sub, marginBottom: 16, lineHeight: 1.5 }}>
+      <div className="ff-body" style={{ fontSize: 13.5, color: C.sub, marginBottom: 16, lineHeight: 1.5 }}>
         Invite people by email to see this same farm. <strong>Master</strong> can add, edit, and delete just like you. <strong>Viewer</strong> can only look — nothing they do can change your data.
       </div>
 
@@ -671,7 +755,7 @@ function ManageAccessModal({ ownerId, onClose }) {
       <Field label="Role">
         <Segmented options={['viewer', 'master']} value={role} onChange={setRole} />
       </Field>
-      {error && <div style={{ background: C.rustSoft, color: C.rust, borderRadius: 10, padding: 10, fontSize: 12.5, marginBottom: 12 }}>{error}</div>}
+      {error && <div style={{ background: C.rustSoft, color: C.rust, borderRadius: 10, padding: 10, fontSize: 13.5, marginBottom: 12 }}>{error}</div>}
       <PrimaryButton disabled={busy} onClick={sendInvite}>{busy ? 'Sending…' : 'Send invite'}</PrimaryButton>
 
       <div style={{ marginTop: 22 }}>
@@ -686,8 +770,8 @@ function ManageAccessModal({ ownerId, onClose }) {
               <div key={inv.id} style={rowCardStyle}>
                 <Mail size={16} color={C.grey} />
                 <div style={{ flex: 1, marginLeft: 10 }}>
-                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{inv.email}</div>
-                  <div style={{ fontSize: 11, color: C.sub }}>Waiting to accept · {inv.role}</div>
+                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 14, color: C.ink }}>{inv.email}</div>
+                  <div style={{ fontSize: 12.5, color: C.sub }}>Waiting to accept · {inv.role}</div>
                 </div>
                 <button onClick={() => cancelInvite(inv.id)} style={{ background: C.greySoft, border: 'none', borderRadius: 8, padding: 6 }}><X size={14} color={C.ink} /></button>
               </div>
@@ -706,8 +790,8 @@ function ManageAccessModal({ ownerId, onClose }) {
               <div key={m.id} style={rowCardStyle}>
                 {m.role === 'master' ? <UserPlus size={16} color={C.green} /> : <Eye size={16} color={C.grey} />}
                 <div style={{ flex: 1, marginLeft: 10 }}>
-                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{m.email || 'Member'}</div>
-                  <div style={{ fontSize: 11, color: C.sub }}>{m.role === 'master' ? 'Master access' : 'View only'}</div>
+                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 14, color: C.ink }}>{m.email || 'Member'}</div>
+                  <div style={{ fontSize: 12.5, color: C.sub }}>{m.role === 'master' ? 'Master access' : 'View only'}</div>
                 </div>
                 <button onClick={() => revokeMember(m.id)} style={{ background: C.rustSoft, border: 'none', borderRadius: 8, padding: 6 }}><Trash2 size={14} color={C.rust} /></button>
               </div>
@@ -740,8 +824,8 @@ function ProfileModal({ ownerName, farmName, totalAnimals, email, role, onSavePr
           <UserCircle size={30} color={C.green} />
         </div>
         <div style={{ minWidth: 0 }}>
-          <div className="ff-display" style={{ fontWeight: 700, fontSize: 16, color: C.ink }}>{ownerName || 'Add your name'}</div>
-          <div style={{ fontSize: 11.5, color: C.sub, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{email}</div>
+          <div className="ff-display" style={{ fontWeight: 700, fontSize: 17, color: C.ink }}>{ownerName || 'Add your name'}</div>
+          <div style={{ fontSize: 13, color: C.sub, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{email}</div>
           {role !== 'owner' && (
             <div style={{ marginTop: 4 }}>
               <Chip bg={role === 'master' ? C.greenSoft : C.greySoft} fg={role === 'master' ? C.green : C.grey}>
@@ -761,20 +845,20 @@ function ProfileModal({ ownerName, farmName, totalAnimals, email, role, onSavePr
       <PrimaryButton disabled={busy} onClick={save}>{busy ? 'Saving…' : saved ? 'Saved ✓' : 'Save changes'}</PrimaryButton>
 
       <div style={{ marginTop: 20, background: C.greenSoft, borderRadius: 12, padding: '12px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ fontSize: 12.5, color: C.green, fontWeight: 600 }}>Total animals</div>
-        <div className="ff-display" style={{ fontWeight: 700, fontSize: 18, color: C.green }}>{totalAnimals}</div>
+        <div style={{ fontSize: 13.5, color: C.green, fontWeight: 600 }}>Total animals</div>
+        <div className="ff-display" style={{ fontWeight: 700, fontSize: 20, color: C.green }}>{totalAnimals}</div>
       </div>
 
       <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <button onClick={onChangePassword} className="ff-body" style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: `1px solid ${C.line}`, borderRadius: 10, padding: '11px 14px', fontSize: 13, fontWeight: 600, color: C.ink }}>
+        <button onClick={onChangePassword} className="ff-body" style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: `1px solid ${C.line}`, borderRadius: 10, padding: '11px 14px', fontSize: 14, fontWeight: 600, color: C.ink }}>
           <KeyRound size={16} color={C.grey} /> Change password
         </button>
         {role === 'owner' && (
-          <button onClick={onManageAccess} className="ff-body" style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: `1px solid ${C.line}`, borderRadius: 10, padding: '11px 14px', fontSize: 13, fontWeight: 600, color: C.ink }}>
+          <button onClick={onManageAccess} className="ff-body" style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: `1px solid ${C.line}`, borderRadius: 10, padding: '11px 14px', fontSize: 14, fontWeight: 600, color: C.ink }}>
             <Users size={16} color={C.grey} /> Manage access
           </button>
         )}
-        <button onClick={onSignOut} className="ff-body" style={{ display: 'flex', alignItems: 'center', gap: 10, background: C.rustSoft, border: 'none', borderRadius: 10, padding: '11px 14px', fontSize: 13, fontWeight: 700, color: C.rust }}>
+        <button onClick={onSignOut} className="ff-body" style={{ display: 'flex', alignItems: 'center', gap: 10, background: C.rustSoft, border: 'none', borderRadius: 10, padding: '11px 14px', fontSize: 14, fontWeight: 700, color: C.rust }}>
           <LogOut size={16} /> Sign out
         </button>
       </div>
@@ -830,7 +914,7 @@ function ChangePasswordModal({ email, onClose }) {
   if (done) {
     return (
       <Modal title="Password Changed" onClose={finish}>
-        <div style={{ background: C.greenSoft, color: C.green, borderRadius: 10, padding: 12, fontSize: 13, marginBottom: 14 }}>
+        <div style={{ background: C.greenSoft, color: C.green, borderRadius: 10, padding: 12, fontSize: 14, marginBottom: 14 }}>
           Your password has been updated. Tap below to sign out — then log back in using your <strong>new</strong> password.
         </div>
         <PrimaryButton onClick={finish}>Sign out now</PrimaryButton>
@@ -842,23 +926,23 @@ function ChangePasswordModal({ email, onClose }) {
     <Modal title="Change Password" onClose={onClose}>
       <Field label="Current password">
         <div style={{ position: 'relative' }}>
-          <Lock size={15} color={C.grey} style={{ position: 'absolute', left: 12, top: 12 }} />
-          <input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} placeholder="Your current password" style={{ ...inputStyle, paddingLeft: 34 }} />
+          <Lock size={18} color={C.grey} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)' }} />
+          <input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} placeholder="Your current password" style={{ ...inputStyle, paddingLeft: 42 }} />
         </div>
       </Field>
       <Field label="New password">
         <div style={{ position: 'relative' }}>
-          <Lock size={15} color={C.grey} style={{ position: 'absolute', left: 12, top: 12 }} />
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 6 characters" style={{ ...inputStyle, paddingLeft: 34 }} />
+          <Lock size={18} color={C.grey} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)' }} />
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 6 characters" style={{ ...inputStyle, paddingLeft: 42 }} />
         </div>
       </Field>
       <Field label="Confirm new password">
         <div style={{ position: 'relative' }}>
-          <Lock size={15} color={C.grey} style={{ position: 'absolute', left: 12, top: 12 }} />
-          <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Re-enter new password" style={{ ...inputStyle, paddingLeft: 34 }} />
+          <Lock size={18} color={C.grey} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)' }} />
+          <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Re-enter new password" style={{ ...inputStyle, paddingLeft: 42 }} />
         </div>
       </Field>
-      {error && <div style={{ background: C.rustSoft, color: C.rust, borderRadius: 10, padding: 10, fontSize: 12.5, marginBottom: 12 }}>{error}</div>}
+      {error && <div style={{ background: C.rustSoft, color: C.rust, borderRadius: 10, padding: 10, fontSize: 13.5, marginBottom: 12 }}>{error}</div>}
       <PrimaryButton disabled={busy} onClick={submit}>{busy ? 'Updating…' : 'Update password'}</PrimaryButton>
     </Modal>
   );
@@ -893,32 +977,31 @@ function AuthScreen() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', justifyContent: 'center', background: C.bg }}>
+    <div style={{ minHeight: '100vh', display: 'flex', justifyContent: 'center', background: '#fff' }}>
       {FONTS}
-      <div className="ff-body" style={{ width: '100%', maxWidth: 420, padding: 24, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-        <div style={{ textAlign: 'center', marginBottom: 28 }}>
-          <div style={{ width: 56, height: 56, borderRadius: 16, background: C.greenSoft, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
-            <CowIcon size={28} color={C.green} />
-          </div>
-          <div className="ff-display" style={{ fontWeight: 700, fontSize: 20, color: C.ink }}>Dairy Farm Manager</div>
-          <div style={{ fontSize: 12.5, color: C.sub, marginTop: 4 }}>{mode === 'login' ? 'Log in to your farm' : 'Create your account'}</div>
+      <div className="ff-body" style={{ width: '100%', maxWidth: 420, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ borderRadius: '0 0 34px 34px', overflow: 'hidden', marginBottom: 24 }}><PastureScene height={200} /></div>
+        <div style={{ padding: '0 24px 28px' }}>
+        <div style={{ marginBottom: 24 }}>
+          <div className="ff-display" style={{ fontSize: 30, color: C.ink, lineHeight: 1.15 }}>Dairy Farm Manager</div>
+          <div style={{ fontSize: 16, color: C.sub, marginTop: 6 }}>{mode === 'login' ? 'Log in to your farm' : 'Create your account'}</div>
         </div>
 
         <Field label="Email">
           <div style={{ position: 'relative' }}>
-            <Mail size={15} color={C.grey} style={{ position: 'absolute', left: 12, top: 12 }} />
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" style={{ ...inputStyle, paddingLeft: 34 }} />
+            <Mail size={18} color={C.grey} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)' }} />
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" style={{ ...inputStyle, paddingLeft: 42 }} />
           </div>
         </Field>
         <Field label="Password">
           <div style={{ position: 'relative' }}>
-            <Lock size={15} color={C.grey} style={{ position: 'absolute', left: 12, top: 12 }} />
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 6 characters" style={{ ...inputStyle, paddingLeft: 34 }} />
+            <Lock size={18} color={C.grey} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)' }} />
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 6 characters" style={{ ...inputStyle, paddingLeft: 42 }} />
           </div>
         </Field>
 
-        {error && <div style={{ background: C.rustSoft, color: C.rust, borderRadius: 10, padding: 10, fontSize: 12.5, marginBottom: 12 }}>{error}</div>}
-        {info && <div style={{ background: C.greenSoft, color: C.green, borderRadius: 10, padding: 10, fontSize: 12.5, marginBottom: 12 }}>{info}</div>}
+        {error && <div style={{ background: C.rustSoft, color: C.rust, borderRadius: 10, padding: 10, fontSize: 13.5, marginBottom: 12 }}>{error}</div>}
+        {info && <div style={{ background: C.greenSoft, color: C.green, borderRadius: 10, padding: 10, fontSize: 13.5, marginBottom: 12 }}>{info}</div>}
 
         <PrimaryButton disabled={busy} onClick={submit}>
           {busy ? 'Please wait…' : mode === 'login' ? 'Log in' : 'Sign up'}
@@ -927,10 +1010,11 @@ function AuthScreen() {
         <button
           onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError(''); setInfo(''); }}
           className="ff-body"
-          style={{ marginTop: 14, background: 'none', border: 'none', color: C.green, fontSize: 12.5, fontWeight: 600, textAlign: 'center' }}
+          style={{ marginTop: 14, background: 'none', border: 'none', color: C.brand, fontSize: 15, fontWeight: 700, textAlign: 'center', width: '100%' }}
         >
           {mode === 'login' ? "New here? Create an account" : 'Already have an account? Log in'}
         </button>
+        </div>
       </div>
     </div>
   );
@@ -1180,8 +1264,8 @@ export default function App() {
       <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.bg, padding: 24 }}>
         {FONTS}
         <div className="ff-body" style={{ maxWidth: 380, textAlign: 'center', color: C.ink }}>
-          <div className="ff-display" style={{ fontWeight: 700, fontSize: 16, marginBottom: 8 }}>Setup needed</div>
-          <div style={{ fontSize: 13, color: C.sub, lineHeight: 1.6 }}>
+          <div className="ff-display" style={{ fontWeight: 700, fontSize: 17, marginBottom: 8 }}>Setup needed</div>
+          <div style={{ fontSize: 14, color: C.sub, lineHeight: 1.6 }}>
             This app needs its Supabase connection details set as environment variables (VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY) when it's deployed. Check the SETUP.md instructions that came with this project.
           </div>
         </div>
@@ -1193,7 +1277,7 @@ export default function App() {
     return (
       <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.bg }}>
         {FONTS}
-        <div className="ff-body" style={{ color: C.sub, fontSize: 13 }}>Loading…</div>
+        <div className="ff-body" style={{ color: C.sub, fontSize: 14 }}>Loading…</div>
       </div>
     );
   }
@@ -1206,7 +1290,7 @@ export default function App() {
     return (
       <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.bg }}>
         {FONTS}
-        <div className="ff-body" style={{ color: C.sub, fontSize: 13 }}>Loading your farm…</div>
+        <div className="ff-body" style={{ color: C.sub, fontSize: 14 }}>Loading your farm…</div>
       </div>
     );
   }
@@ -1663,7 +1747,7 @@ export default function App() {
 
           {restorePending && (
             <Modal title="Restore this backup?" onClose={() => setRestorePending(null)}>
-              <div style={{ fontSize: 13, color: C.sub, marginBottom: 14, lineHeight: 1.5 }}>
+              <div style={{ fontSize: 14, color: C.sub, marginBottom: 14, lineHeight: 1.5 }}>
                 This will replace everything currently in the app — {(restorePending.cows || []).length} cow(s), {(restorePending.milk || []).length} milk record(s), {(restorePending.medical || []).length} health record(s) — with the data from this backup file
                 {restorePending.exportedAt ? ` (saved ${fmtDate(restorePending.exportedAt.slice(0, 10))})` : ''}. This can't be undone.
               </div>
@@ -1673,7 +1757,7 @@ export default function App() {
 
           {restoreMsg && (
             <Modal title="Couldn't restore" onClose={() => setRestoreMsg('')}>
-              <div style={{ fontSize: 13, color: C.sub, marginBottom: 14 }}>{restoreMsg}</div>
+              <div style={{ fontSize: 14, color: C.sub, marginBottom: 14 }}>{restoreMsg}</div>
               <PrimaryButton onClick={() => setRestoreMsg('')}>Okay</PrimaryButton>
             </Modal>
           )}
@@ -1699,7 +1783,7 @@ function BottomNav({ tab, setTab }) {
     { key: 'finance', label: 'Finance', icon: Wallet },
   ];
   return (
-    <div style={{ flexShrink: 0, background: '#fff', borderTop: `1px solid ${C.line}`, display: 'flex', padding: '7px 2px', paddingBottom: 'max(9px, calc(env(safe-area-inset-bottom) + 5px))', zIndex: 30 }}>
+    <div style={{ flexShrink: 0, background: '#fff', boxShadow: '0 -6px 20px rgba(0,0,0,0.07)', display: 'flex', padding: '4px 2px', paddingBottom: 'max(10px, calc(env(safe-area-inset-bottom) + 6px))', zIndex: 30, borderRadius: '20px 20px 0 0' }}>
       {items.map(({ key, label, icon: Icon }) => {
         const active = tab === key;
         return (
@@ -1707,10 +1791,11 @@ function BottomNav({ tab, setTab }) {
             key={key}
             onClick={() => setTab(key)}
             className="ff-body"
-            style={{ flex: 1, background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, color: active ? C.green : C.grey, padding: '3px 0', minHeight: 40 }}
+            style={{ flex: 1, position: 'relative', background: 'none', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, color: active ? C.brand : C.grey, padding: '9px 0 4px', minHeight: 52 }}
           >
-            <Icon size={18} strokeWidth={active ? 2.4 : 2} />
-            <span style={{ fontSize: 9.5, fontWeight: active ? 700 : 500 }}>{label}</span>
+            {active && <div style={{ position: 'absolute', top: 0, width: 26, height: 3.5, borderRadius: 2, background: C.brand }} />}
+            <Icon size={22} strokeWidth={active ? 2.5 : 2} />
+            <span style={{ fontSize: 11, fontWeight: active ? 800 : 600 }}>{label}</span>
           </button>
         );
       })}
@@ -1725,13 +1810,13 @@ function AskAIFab({ onClick }) {
       aria-label="Ask AI about your farm"
       className="ff-body"
       style={{
-        position: 'absolute', right: 14, bottom: 78, zIndex: 25,
-        width: 50, height: 50, borderRadius: 25, border: 'none',
-        background: C.green, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
-        boxShadow: '0 4px 14px rgba(0,0,0,0.25)',
+        position: 'absolute', left: 16, bottom: 90, zIndex: 25,
+        background: C.ink, color: '#fff', border: 'none', borderRadius: 16, padding: '12px 16px',
+        display: 'flex', alignItems: 'center', gap: 8, fontSize: 15, fontWeight: 700,
+        boxShadow: '0 10px 22px rgba(0,0,0,0.3)',
       }}
     >
-      <Sparkles size={21} />
+      <Sparkles size={18} color="#FFD166" /> Ask AI
     </button>
   );
 }
@@ -1777,22 +1862,22 @@ function AskAIPanel({ farmData, farmName, focusCow, onClose }) {
   return ReactDOM.createPortal(
     <div style={{ position: 'fixed', inset: 0, background: C.bg, zIndex: 1100, display: 'flex', justifyContent: 'center' }}>
       <div style={{ width: '100%', maxWidth: 420, display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <div style={{ background: C.green, padding: '14px 16px', paddingTop: 'max(14px, env(safe-area-inset-top))', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+        <div style={{ background: `linear-gradient(135deg, ${C.brand} 0%, ${C.brandDark} 100%)`, padding: '14px 16px', paddingTop: 'max(14px, env(safe-area-inset-top))', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
           <div style={{ width: 32, height: 32, borderRadius: 16, background: 'rgba(255,255,255,0.18)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Sparkles size={16} color="#fff" />
           </div>
           <div style={{ flex: 1 }}>
-            <div className="ff-display" style={{ fontWeight: 700, fontSize: 15, color: '#fff' }}>Ask about your farm</div>
-            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.8)' }}>{focusCow ? `Focused on ${focusCow.name}` : 'Animals, health, milk & finance'}</div>
+            <div className="ff-display" style={{ fontWeight: 700, fontSize: 16, color: '#fff' }}>Ask about your farm</div>
+            <div style={{ fontSize: 12.5, color: 'rgba(255,255,255,0.8)' }}>{focusCow ? `Focused on ${focusCow.name}` : 'Animals, health, milk & finance'}</div>
           </div>
-          <button onClick={onClose} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: 10, padding: 8, display: 'flex' }}>
+          <button onClick={onClose} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: 10, padding: 8, display: 'flex' }}>
             <X size={16} color="#fff" />
           </button>
         </div>
 
         <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: 16, WebkitOverflowScrolling: 'touch' }}>
           {messages.length === 0 && (
-            <div style={{ textAlign: 'center', color: C.sub, fontSize: 12.5, marginTop: 30, padding: '0 14px' }}>
+            <div style={{ textAlign: 'center', color: C.sub, fontSize: 13.5, marginTop: 30, padding: '0 14px' }}>
               Ask anything about your herd — e.g. "which cows are due for heat this week",
               "how much milk did we get yesterday", "total expenses last month", or "is {focusCow ? focusCow.name : 'Ganga'} pregnant".
             </div>
@@ -1802,8 +1887,8 @@ function AskAIPanel({ farmData, farmName, focusCow, onClose }) {
               <div
                 className="ff-body"
                 style={{
-                  maxWidth: '82%', borderRadius: 14, padding: '10px 13px', fontSize: 13.5, lineHeight: 1.45, whiteSpace: 'pre-wrap',
-                  background: m.role === 'user' ? C.green : m.role === 'error' ? C.rustSoft : '#fff',
+                  maxWidth: '82%', borderRadius: 14, padding: '10px 13px', fontSize: 14.5, lineHeight: 1.45, whiteSpace: 'pre-wrap',
+                  background: m.role === 'user' ? C.brand : m.role === 'error' ? C.rustSoft : '#fff',
                   color: m.role === 'user' ? '#fff' : m.role === 'error' ? C.rust : C.ink,
                   border: m.role === 'assistant' ? `1px solid ${C.line}` : 'none',
                 }}
@@ -1814,7 +1899,7 @@ function AskAIPanel({ farmData, farmName, focusCow, onClose }) {
           ))}
           {busy && (
             <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: 10 }}>
-              <div style={{ background: '#fff', border: `1px solid ${C.line}`, borderRadius: 14, padding: '10px 13px', fontSize: 13, color: C.sub }}>Thinking…</div>
+              <div style={{ background: '#fff', border: `1px solid ${C.line}`, borderRadius: 14, padding: '10px 13px', fontSize: 14, color: C.sub }}>Thinking…</div>
             </div>
           )}
         </div>
@@ -1827,12 +1912,12 @@ function AskAIPanel({ farmData, farmName, focusCow, onClose }) {
             placeholder="Ask about your animals, health, milk, or finances…"
             rows={1}
             className="ff-body"
-            style={{ flex: 1, resize: 'none', maxHeight: 90, border: `1.5px solid ${C.line}`, borderRadius: 12, padding: '10px 12px', fontSize: 13.5, outline: 'none', fontFamily: 'inherit' }}
+            style={{ flex: 1, resize: 'none', maxHeight: 90, border: `1.5px solid ${C.line}`, borderRadius: 12, padding: '10px 12px', fontSize: 14.5, outline: 'none', fontFamily: 'inherit' }}
           />
           <button
             onClick={send}
             disabled={busy || !input.trim()}
-            style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 20, border: 'none', background: C.green, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: busy || !input.trim() ? 0.5 : 1 }}
+            style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 20, border: 'none', background: C.brand, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: busy || !input.trim() ? 0.5 : 1 }}
           >
             <Send size={16} />
           </button>
@@ -1846,32 +1931,80 @@ function AskAIPanel({ farmData, farmName, focusCow, onClose }) {
 // ---------- Home ----------
 function HomeScreen({ cows, milkToday, heatAlerts, medDue, insemAlerts, insuranceAlerts, onOpenCow, onOpenCowTab, onGoTab, onBackup, onRestore, onOpenProfile, farmName, userEmail }) {
   const { isReadOnly } = useContext(RoleContext);
+  const milkingCount = cows.filter((c) => c.status === 'active').length;
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+  const quick = [
+    { key: 'cows', label: 'Animals', emoji: '🐄', bg: '#FFE8DC' },
+    { key: 'milk', label: 'Milk', emoji: '🥛', bg: '#E3F0FF' },
+    { key: 'heat', label: 'Heat', emoji: '🔥', bg: '#FFE3E6' },
+    { key: 'health', label: 'Health', emoji: '💉', bg: '#E5F6EC' },
+    { key: 'feed', label: 'Feed', emoji: '🌾', bg: '#FFF1CC' },
+    { key: 'finance', label: 'Finance', emoji: '💰', bg: '#EDE7FB' },
+  ];
   return (
-    <div>
+    <div style={{ paddingBottom: 24 }}>
       <ScreenHeader
-        title={farmName || 'My Farm'} subtitle={`${cows.length} cow${cows.length === 1 ? '' : 's'} on record`}
+        title={farmName || 'My Farm'} subtitle={`${greeting} 👋`}
         right={
           <div style={{ display: 'flex', gap: 6 }}>
-            <HeaderIconButton title="Backup all data" icon={<Download size={15} color="#fff" />} onClick={onBackup} />
-            {!isReadOnly && <HeaderIconButton title="Restore from backup" icon={<Upload size={15} color="#fff" />} onClick={onRestore} />}
-            <HeaderIconButton title="Profile" icon={<UserCircle size={15} color="#fff" />} onClick={onOpenProfile} />
+            <HeaderIconButton title="Backup all data" icon={<Download size={17} color="#fff" />} onClick={onBackup} />
+            {!isReadOnly && <HeaderIconButton title="Restore from backup" icon={<Upload size={17} color="#fff" />} onClick={onRestore} />}
+            <HeaderIconButton title="Profile" icon={<UserCircle size={17} color="#fff" />} onClick={onOpenProfile} />
           </div>
         }
-      />
+      >
+        <button
+          onClick={() => onGoTab('cows')}
+          className="ff-body"
+          style={{ marginTop: 16, width: '100%', background: '#fff', border: 'none', borderRadius: 14, padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 10, color: C.grey, fontSize: 16, fontWeight: 500, textAlign: 'left', boxShadow: '0 8px 18px rgba(0,0,0,0.14)' }}
+        >
+          <Search size={20} color={C.brand} /> Search animals by name or tag
+        </button>
+      </ScreenHeader>
       <div style={{ padding: 16 }}>
         {isReadOnly && (
-          <div style={{ background: C.greySoft, borderRadius: 12, padding: '10px 12px', marginBottom: 12, fontSize: 11.5, color: C.grey, lineHeight: 1.5, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Eye size={14} /> You have view-only access to this farm — adding, editing, and deleting is turned off for your account.
+          <div style={{ background: C.greySoft, borderRadius: 14, padding: '12px 14px', marginBottom: 14, fontSize: 13.5, color: C.sub, lineHeight: 1.5, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Eye size={16} /> You have view-only access to this farm — adding, editing, and deleting is turned off for your account.
           </div>
         )}
-        <div style={{ background: C.milkSoft, borderRadius: 12, padding: '10px 12px', marginBottom: 16, fontSize: 11.5, color: C.milk, lineHeight: 1.5 }}>
-          Tip: your data syncs automatically to any device you log into with this account. Use the download/upload icons above for an extra offline backup.
+
+        <div style={{ position: 'relative', overflow: 'hidden', borderRadius: 24, background: 'linear-gradient(135deg, #E23744 0%, #F0584F 55%, #FF8A5B 100%)', color: '#fff', padding: '20px 18px', minHeight: 158, boxShadow: '0 14px 28px rgba(226,55,68,0.28)', marginBottom: 22 }}>
+          <div style={{ position: 'absolute', right: -30, top: -40, width: 150, height: 150, borderRadius: 75, background: 'rgba(255,255,255,0.2)' }} />
+          <div style={{ position: 'absolute', right: 60, bottom: -60, width: 120, height: 120, borderRadius: 60, background: 'rgba(255,255,255,0.1)' }} />
+          <div style={{ position: 'relative', zIndex: 1, maxWidth: '58%' }}>
+            <div className="ff-body" style={{ fontSize: 13, fontWeight: 700, letterSpacing: 0.8, opacity: 0.92 }}>TODAY'S MILK</div>
+            <div className="ff-display" style={{ fontSize: 42, lineHeight: 1.05, marginTop: 4 }}>
+              {milkToday.toFixed(1)}<span style={{ fontSize: 20, marginLeft: 4 }}>L</span>
+            </div>
+            <div className="ff-body" style={{ fontSize: 14.5, opacity: 0.95, marginTop: 6, fontWeight: 500 }}>
+              from {milkingCount} milking cow{milkingCount === 1 ? '' : 's'}
+            </div>
+            <button onClick={() => onGoTab('milk')} className="ff-body" style={{ marginTop: 14, background: '#fff', color: C.brand, border: 'none', borderRadius: 12, padding: '9px 16px', fontSize: 15, fontWeight: 800 }}>
+              {isReadOnly ? 'View milk' : 'Log milk'} →
+            </button>
+          </div>
+          <div style={{ position: 'absolute', right: 8, bottom: 0, display: 'flex', alignItems: 'flex-end', zIndex: 1 }}>
+            <div style={{ marginRight: -14, marginBottom: 6, transform: 'rotate(-8deg)' }}><MilkBottle size={42} /></div>
+            <CowFace size={118} />
+          </div>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 18 }}>
-          <StatCard label="Milk today" value={`${milkToday.toFixed(1)} L`} bg={C.milkSoft} fg={C.milk} icon={<Droplet size={16} />} onClick={() => onGoTab('milk')} />
-          <StatCard label="Milking cows" value={cows.filter((c) => c.status === 'active').length} bg={C.greenSoft} fg={C.green} icon={<CowIcon size={16} />} onClick={() => onGoTab('cows')} />
-          <StatCard label="Heat alerts" value={heatAlerts.length} bg={C.rustSoft} fg={C.rust} icon={<HeartPulse size={16} />} onClick={() => onGoTab('heat')} />
-          <StatCard label="Health due" value={medDue.length} bg={C.amberSoft} fg={C.amber} icon={<Stethoscope size={16} />} onClick={() => onGoTab('health')} />
+
+        <SectionTitle title="Manage your farm" />
+        <div style={{ display: 'flex', gap: 14, overflowX: 'auto', margin: '0 -16px 8px', padding: '4px 16px 14px' }}>
+          {quick.map((q) => (
+            <button key={q.key} onClick={() => onGoTab(q.key)} style={{ background: 'none', border: 'none', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, width: 74, padding: 0 }}>
+              <div style={{ width: 70, height: 70, borderRadius: 35, background: q.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 33, boxShadow: '0 6px 14px rgba(0,0,0,0.08)' }}>{q.emoji}</div>
+              <span className="ff-body" style={{ fontSize: 14.5, fontWeight: 700, color: C.ink }}>{q.label}</span>
+            </button>
+          ))}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 22 }}>
+          <StatCard label="Milk today" value={`${milkToday.toFixed(1)} L`} bg={C.milkSoft} fg={C.milk} icon={<Droplet size={19} />} onClick={() => onGoTab('milk')} />
+          <StatCard label="Milking cows" value={milkingCount} bg={C.greenSoft} fg={C.green} icon={<CowIcon size={19} />} onClick={() => onGoTab('cows')} />
+          <StatCard label="Heat alerts" value={heatAlerts.length} bg={C.rustSoft} fg={C.rust} icon={<HeartPulse size={19} />} onClick={() => onGoTab('heat')} />
+          <StatCard label="Health due" value={medDue.length} bg={C.amberSoft} fg={C.amber} icon={<Stethoscope size={19} />} onClick={() => onGoTab('health')} />
         </div>
 
         <SectionTitle title="Insemination checks" />
@@ -1883,8 +2016,8 @@ function HomeScreen({ cows, milkToday, heatAlerts, medDue, insemAlerts, insuranc
               <div key={cow.id} onClick={() => onOpenCowTab(cow.id, 'heat')} style={rowCardStyle}>
                 <EarTag number={cow.tagNumber} size="sm" />
                 <div style={{ flex: 1, marginLeft: 10 }}>
-                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{cow.name}</div>
-                  <div style={{ fontSize: 11.5, color: C.sub }}>
+                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 14.5, color: C.ink }}>{cow.name}</div>
+                  <div style={{ fontSize: 13, color: C.sub }}>
                     {daysUntil === 0 ? '20 days since insemination — check today' : `20-day mark passed ${Math.abs(daysUntil)} day${Math.abs(daysUntil) === 1 ? '' : 's'} ago`}
                   </div>
                 </div>
@@ -1903,8 +2036,8 @@ function HomeScreen({ cows, milkToday, heatAlerts, medDue, insemAlerts, insuranc
               <div key={cow.id} onClick={() => onOpenCowTab(cow.id, 'heat')} style={rowCardStyle}>
                 <EarTag number={cow.tagNumber} size="sm" />
                 <div style={{ flex: 1, marginLeft: 10 }}>
-                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{cow.name}</div>
-                  <div style={{ fontSize: 11.5, color: C.sub }}>{status === 'overdue' ? `${Math.abs(daysUntil)} days overdue` : `Due in ${daysUntil} day${daysUntil === 1 ? '' : 's'}`}</div>
+                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 14.5, color: C.ink }}>{cow.name}</div>
+                  <div style={{ fontSize: 13, color: C.sub }}>{status === 'overdue' ? `${Math.abs(daysUntil)} days overdue` : `Due in ${daysUntil} day${daysUntil === 1 ? '' : 's'}`}</div>
                 </div>
                 <Chip bg={status === 'overdue' ? C.rustSoft : C.amberSoft} fg={status === 'overdue' ? C.rust : C.amber}>{status === 'overdue' ? 'Overdue' : 'Due soon'}</Chip>
               </div>
@@ -1924,8 +2057,8 @@ function HomeScreen({ cows, milkToday, heatAlerts, medDue, insemAlerts, insuranc
                 <div key={m.id} onClick={() => cow && onOpenCowTab(cow.id, 'health')} style={rowCardStyle}>
                   {cow && <EarTag number={cow.tagNumber} size="sm" />}
                   <div style={{ flex: 1, marginLeft: 10 }}>
-                    <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{cow ? cow.name : 'Unknown'} · {m.type}</div>
-                    <div style={{ fontSize: 11.5, color: C.sub }}>Follow-up {fmtDateShort(m.nextDueDate)}</div>
+                    <div className="ff-display" style={{ fontWeight: 700, fontSize: 14.5, color: C.ink }}>{cow ? cow.name : 'Unknown'} · {m.type}</div>
+                    <div style={{ fontSize: 13, color: C.sub }}>Follow-up {fmtDateShort(m.nextDueDate)}</div>
                   </div>
                   <Chip bg={overdue ? C.rustSoft : C.amberSoft} fg={overdue ? C.rust : C.amber}>{overdue ? 'Overdue' : 'Soon'}</Chip>
                 </div>
@@ -1942,8 +2075,8 @@ function HomeScreen({ cows, milkToday, heatAlerts, medDue, insemAlerts, insuranc
                 <div key={cow.id} onClick={() => onOpenCow(cow.id)} style={rowCardStyle}>
                   <EarTag number={cow.tagNumber} size="sm" />
                   <div style={{ flex: 1, marginLeft: 10 }}>
-                    <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{cow.name}</div>
-                    <div style={{ fontSize: 11.5, color: C.sub }}>
+                    <div className="ff-display" style={{ fontWeight: 700, fontSize: 14.5, color: C.ink }}>{cow.name}</div>
+                    <div style={{ fontSize: 13, color: C.sub }}>
                       {status === 'expired' ? `Insurance expired ${fmtDateShort(cow.insuranceExpiryDate)}` : `Insurance expires ${fmtDateShort(cow.insuranceExpiryDate)}`}
                     </div>
                   </div>
@@ -1953,6 +2086,9 @@ function HomeScreen({ cows, milkToday, heatAlerts, medDue, insemAlerts, insuranc
             </div>
           </>
         )}
+        <div className="ff-body" style={{ marginTop: 22, background: C.milkSoft, borderRadius: 14, padding: '12px 14px', fontSize: 13.5, color: C.milk, lineHeight: 1.5 }}>
+          Tip: your data syncs automatically to any device you log into with this account. Use the download/upload icons at the top for an extra offline backup.
+        </div>
       </div>
     </div>
   );
@@ -1960,23 +2096,25 @@ function HomeScreen({ cows, milkToday, heatAlerts, medDue, insemAlerts, insuranc
 
 function StatCard({ label, value, bg, fg, icon, onClick }) {
   return (
-    <button onClick={onClick} style={{ background: bg, borderRadius: 14, padding: '12px 14px', textAlign: 'left', border: 'none' }}>
-      <div style={{ color: fg, marginBottom: 8 }}>{icon}</div>
-      <div className="ff-display" style={{ fontWeight: 700, fontSize: 20, color: fg }}>{value}</div>
-      <div className="ff-body" style={{ fontSize: 11.5, color: fg, opacity: 0.8, fontWeight: 600 }}>{label}</div>
+    <button onClick={onClick} style={{ background: '#fff', borderRadius: 18, padding: 14, textAlign: 'left', border: 'none', boxShadow: C.shadow, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ width: 38, height: 38, borderRadius: 12, background: bg, color: fg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{icon}</div>
+      <div>
+        <div className="ff-display" style={{ fontSize: 26, color: C.ink, lineHeight: 1.1 }}>{value}</div>
+        <div className="ff-body" style={{ fontSize: 14, color: C.sub, fontWeight: 600, marginTop: 3 }}>{label}</div>
+      </div>
     </button>
   );
 }
 
 function SectionTitle({ title }) {
-  return <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink, marginBottom: 8, marginTop: 4 }}>{title}</div>;
+  return <div className="ff-display" style={{ fontSize: 19, color: C.ink, marginBottom: 12, marginTop: 6 }}>{title}</div>;
 }
 
 function MutedNote({ text }) {
-  return <div className="ff-body" style={{ fontSize: 12.5, color: C.sub, background: '#fff', borderRadius: 12, padding: 14, marginBottom: 18, border: `1px solid ${C.line}` }}>{text}</div>;
+  return <div className="ff-body" style={{ fontSize: 14.5, color: C.sub, background: '#fff', borderRadius: 16, padding: 16, marginBottom: 20, boxShadow: C.shadow, lineHeight: 1.45 }}>{text}</div>;
 }
 
-const rowCardStyle = { background: '#fff', borderRadius: 12, padding: 10, display: 'flex', alignItems: 'center', border: `1px solid ${C.line}`, cursor: 'pointer' };
+const rowCardStyle = { background: '#fff', borderRadius: 16, padding: 12, display: 'flex', alignItems: 'center', border: 'none', boxShadow: C.shadow, cursor: 'pointer' };
 
 // ---------- Cows list ----------
 function CowsScreen({ cows, heatStatusFor, onOpenCow, onAddCow, onAddCalf, onExport }) {
@@ -2009,22 +2147,22 @@ function CowsScreen({ cows, heatStatusFor, onOpenCow, onAddCow, onAddCalf, onExp
           <button
             onClick={onAddCow}
             className="ff-body"
-            style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.green, color: '#fff', border: 'none', borderRadius: 12, padding: '11px 0', fontWeight: 700, fontSize: 13 }}
+            style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.brand, color: '#fff', border: 'none', borderRadius: 14, padding: '13px 0', fontWeight: 700, fontSize: 15.5, boxShadow: '0 8px 16px rgba(226,55,68,0.28)' }}
           >
             <Plus size={15} /> Add cow
           </button>
           <button
             onClick={onAddCalf}
             className="ff-body"
-            style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.amberSoft, color: C.amber, border: 'none', borderRadius: 12, padding: '11px 0', fontWeight: 700, fontSize: 13 }}
+            style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.amberSoft, color: C.amber, border: 'none', borderRadius: 14, padding: '13px 0', fontWeight: 700, fontSize: 15.5 }}
           >
             <Baby size={15} /> Add calf
           </button>
         </div>
         )}
         <div style={{ position: 'relative', marginBottom: 12 }}>
-          <Search size={15} color={C.grey} style={{ position: 'absolute', left: 12, top: 11 }} />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name, tag, breed" style={{ ...inputStyle, paddingLeft: 34 }} />
+          <Search size={18} color={C.grey} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)' }} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name, tag, breed" style={{ ...inputStyle, paddingLeft: 42 }} />
         </div>
         <div style={{ marginBottom: 14 }}>
           <Segmented
@@ -2044,11 +2182,11 @@ function CowsScreen({ cows, heatStatusFor, onOpenCow, onAddCow, onAddCalf, onExp
             {filtered.map((cow) => {
               const hs = heatStatusFor(cow);
               return (
-                <div key={cow.id} onClick={() => onOpenCow(cow.id)} style={{ ...rowCardStyle, padding: 12 }}>
-                  <EarTag number={cow.tagNumber} tone={earTagTone(cow.status)} />
-                  <div style={{ flex: 1, marginLeft: 12 }}>
-                    <div className="ff-display" style={{ fontWeight: 700, fontSize: 14.5, color: C.ink }}>{cow.name}</div>
-                    <div style={{ fontSize: 11.5, color: C.sub, marginTop: 1 }}>
+                <div key={cow.id} onClick={() => onOpenCow(cow.id)} style={{ ...rowCardStyle, padding: 14 }}>
+                  <CowThumb cow={cow} size={78} />
+                  <div style={{ flex: 1, marginLeft: 14 }}>
+                    <div className="ff-display" style={{ fontWeight: 700, fontSize: 18, color: C.ink }}>{cow.name}</div>
+                    <div style={{ fontSize: 13, color: C.sub, marginTop: 1 }}>
                       {cow.breed}{cow.dob ? ` · ${fmtDateShort(cow.dob)}` : ''}
                       {(cow.status === 'calf' || cow.status === 'heifer') && cow.motherCowId && nameById[cow.motherCowId] ? ` · Mother: ${nameById[cow.motherCowId]}` : ''}
                     </div>
@@ -2096,35 +2234,35 @@ function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus,
         onBack={onBack}
         right={
           <div style={{ display: 'flex', gap: 6 }}>
-            <button onClick={onAskAI} title="Ask AI about this animal" style={{ background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: 10, padding: 8, minWidth: 34, minHeight: 34, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Sparkles size={15} color="#fff" /></button>
+            <button onClick={onAskAI} title="Ask AI about this animal" style={{ background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: 10, padding: 8, minWidth: 34, minHeight: 34, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Sparkles size={15} color="#fff" /></button>
             {!isReadOnly && (
               <>
-                <button onClick={onEdit} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: 10, padding: 8, minWidth: 34, minHeight: 34, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Pencil size={15} color="#fff" /></button>
-                <button onClick={() => setConfirmDel(true)} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: 10, padding: 8, minWidth: 34, minHeight: 34, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Trash2 size={15} color="#fff" /></button>
+                <button onClick={onEdit} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: 10, padding: 8, minWidth: 34, minHeight: 34, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Pencil size={15} color="#fff" /></button>
+                <button onClick={() => setConfirmDel(true)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: 10, padding: 8, minWidth: 34, minHeight: 34, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Trash2 size={15} color="#fff" /></button>
               </>
             )}
           </div>
         }
       />
       <div style={{ padding: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, background: '#fff', border: `1px solid ${C.line}`, borderRadius: 14, padding: 14, marginBottom: 16 }}>
-          <EarTag number={cow.tagNumber} size="lg" tone={earTagTone(cow.status)} />
-          <div style={{ flex: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, background: '#fff', borderRadius: 20, padding: 16, marginBottom: 16, boxShadow: C.shadow }}>
+          <CowThumb cow={cow} size={96} />
+          <div style={{ flex: 1, minWidth: 0, lineHeight: 1.55 }}>
             <StatusPill status={cow.status} />
-            <div style={{ fontSize: 11.5, color: C.sub, marginTop: 6 }}>Born {fmtDate(cow.dob)}</div>
+            <div style={{ fontSize: 13, color: C.sub, marginTop: 6 }}>Born {fmtDate(cow.dob)}</div>
             {cow.status === 'calf' || cow.status === 'heifer' ? (
               <>
-                {cow.gender && <div style={{ fontSize: 11.5, color: C.sub }}>Gender: {cow.gender}</div>}
-                {mother && <div style={{ fontSize: 11.5, color: C.sub }}>Mother: {mother.name} (#{mother.tagNumber})</div>}
-                {cow.birthWeight !== '' && cow.birthWeight != null && <div style={{ fontSize: 11.5, color: C.sub }}>Birth weight: {cow.birthWeight} kg</div>}
+                {cow.gender && <div style={{ fontSize: 13, color: C.sub }}>Gender: {cow.gender}</div>}
+                {mother && <div style={{ fontSize: 13, color: C.sub }}>Mother: {mother.name} (#{mother.tagNumber})</div>}
+                {cow.birthWeight !== '' && cow.birthWeight != null && <div style={{ fontSize: 13, color: C.sub }}>Birth weight: {cow.birthWeight} kg</div>}
               </>
             ) : null}
             {cow.status !== 'calf' && (
               <>
-                <div style={{ fontSize: 11.5, color: C.sub }}>Heat cycle: every {cow.cycleLength || 21} days</div>
-                {cow.calvingDate && <div style={{ fontSize: 11.5, color: C.sub }}>Last calving: {fmtDate(cow.calvingDate)}</div>}
-                {cow.firstHeatDate && <div style={{ fontSize: 11.5, color: C.sub }}>First heat after calving: {fmtDate(cow.firstHeatDate)}</div>}
-                {cow.inseminatedOn && <div style={{ fontSize: 11.5, color: C.sub }}>Inseminated on: {fmtDate(cow.inseminatedOn)}</div>}
+                <div style={{ fontSize: 13, color: C.sub }}>Heat cycle: every {cow.cycleLength || 21} days</div>
+                {cow.calvingDate && <div style={{ fontSize: 13, color: C.sub }}>Last calving: {fmtDate(cow.calvingDate)}</div>}
+                {cow.firstHeatDate && <div style={{ fontSize: 13, color: C.sub }}>First heat after calving: {fmtDate(cow.firstHeatDate)}</div>}
+                {cow.inseminatedOn && <div style={{ fontSize: 13, color: C.sub }}>Inseminated on: {fmtDate(cow.inseminatedOn)}</div>}
                 {cow.pregnancyConfirmed && cow.inseminatedOn && (
                   <div style={{ marginTop: 6 }}>
                     <Chip bg={C.greenSoft} fg={C.green}>Pregnant · Expected calving {fmtDate(addMonths(cow.inseminatedOn, 9))}</Chip>
@@ -2144,15 +2282,15 @@ function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus,
                 })()}
               </div>
             )}
-            {offspring.length > 0 && <div style={{ fontSize: 11.5, color: C.sub, marginTop: 4 }}>Offspring on record: {offspring.length}</div>}
+            {offspring.length > 0 && <div style={{ fontSize: 13, color: C.sub, marginTop: 4 }}>Offspring on record: {offspring.length}</div>}
           </div>
         </div>
 
         <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-          <button onClick={() => onExport('print')} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#fff', border: `1.5px solid ${C.line}`, borderRadius: 10, padding: '9px 0', fontSize: 12.5, fontWeight: 600, color: C.ink }}>
+          <button onClick={() => onExport('print')} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#fff', border: `1.5px solid ${C.line}`, borderRadius: 10, padding: '9px 0', fontSize: 13.5, fontWeight: 600, color: C.ink }}>
             <Printer size={14} /> Print record
           </button>
-          <button onClick={() => onExport('csv')} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#fff', border: `1.5px solid ${C.line}`, borderRadius: 10, padding: '9px 0', fontSize: 12.5, fontWeight: 600, color: C.ink }}>
+          <button onClick={() => onExport('csv')} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: '#fff', border: `1.5px solid ${C.line}`, borderRadius: 10, padding: '9px 0', fontSize: 13.5, fontWeight: 600, color: C.ink }}>
             <Download size={14} /> Download CSV
           </button>
         </div>
@@ -2162,14 +2300,14 @@ function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus,
             marginBottom: 16, borderRadius: 12, padding: 12,
             background: insemStatus.status === 'due' ? C.rustSoft : insemStatus.status === 'stale' ? C.greySoft : C.milkSoft,
           }}>
-            <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: insemStatus.status === 'due' ? C.rust : insemStatus.status === 'stale' ? C.grey : C.milk }}>
+            <div className="ff-display" style={{ fontWeight: 700, fontSize: 14, color: insemStatus.status === 'due' ? C.rust : insemStatus.status === 'stale' ? C.grey : C.milk }}>
               {insemStatus.status === 'due'
                 ? (insemStatus.daysUntil === 0 ? '20 days since insemination — check today' : `20-day check passed ${Math.abs(insemStatus.daysUntil)} day(s) ago`)
                 : insemStatus.status === 'stale'
                 ? '20-day insemination check window has passed'
                 : `Insemination check in ${insemStatus.daysUntil} day(s)`}
             </div>
-            <div style={{ fontSize: 11.5, color: C.sub, marginTop: 2 }}>Inseminated {fmtDate(cow.inseminatedOn)} · check for repeat heat / pregnancy around {fmtDate(insemStatus.checkDate)}</div>
+            <div style={{ fontSize: 13, color: C.sub, marginTop: 2 }}>Inseminated {fmtDate(cow.inseminatedOn)} · check for repeat heat / pregnancy around {fmtDate(insemStatus.checkDate)}</div>
           </div>
         )}
 
@@ -2178,10 +2316,10 @@ function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus,
             marginBottom: 16, borderRadius: 12, padding: 12,
             background: heatStatus.status === 'overdue' ? C.rustSoft : heatStatus.status === 'due' ? C.amberSoft : C.greenSoft,
           }}>
-            <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: heatStatus.status === 'overdue' ? C.rust : heatStatus.status === 'due' ? C.amber : C.green }}>
+            <div className="ff-display" style={{ fontWeight: 700, fontSize: 14, color: heatStatus.status === 'overdue' ? C.rust : heatStatus.status === 'due' ? C.amber : C.green }}>
               {heatStatus.status === 'overdue' ? `Heat overdue by ${Math.abs(heatStatus.daysUntil)} days` : heatStatus.status === 'due' ? `Heat due in ${heatStatus.daysUntil} day(s)` : `Next heat expected ${fmtDateShort(heatStatus.nextDate)}`}
             </div>
-            <div style={{ fontSize: 11.5, color: C.sub, marginTop: 2 }}>Last recorded heat: {fmtDate(heatStatus.lastDate)}</div>
+            <div style={{ fontSize: 13, color: C.sub, marginTop: 2 }}>Last recorded heat: {fmtDate(heatStatus.lastDate)}</div>
           </div>
         )}
 
@@ -2203,8 +2341,8 @@ function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus,
               <div key={m.id} style={rowCardStyle}>
                 <div style={{ color: C.milk }}><Droplet size={16} /></div>
                 <div style={{ flex: 1, marginLeft: 10 }}>
-                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{m.liters} L · {m.session}</div>
-                  <div style={{ fontSize: 11.5, color: C.sub }}>{fmtDate(m.date)}</div>
+                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 14.5, color: C.ink }}>{m.liters} L · {m.session}</div>
+                  <div style={{ fontSize: 13, color: C.sub }}>{fmtDate(m.date)}</div>
                 </div>
               </div>
             )}
@@ -2221,8 +2359,8 @@ function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus,
               <div key={h.id} onClick={() => setViewingHeat(h)} style={rowCardStyle}>
                 <div style={{ color: C.rust }}><HeartPulse size={16} /></div>
                 <div style={{ flex: 1, marginLeft: 10 }}>
-                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{fmtDate(h.date)}</div>
-                  {h.notes && <div style={{ fontSize: 11.5, color: C.sub }}>{h.notes}</div>}
+                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 14.5, color: C.ink }}>{fmtDate(h.date)}</div>
+                  {h.notes && <div style={{ fontSize: 13, color: C.sub }}>{h.notes}</div>}
                 </div>
                 {h.bred && <Chip bg={C.greenSoft} fg={C.green}>Bred</Chip>}
                 <ChevronRight size={16} color={C.grey} />
@@ -2241,14 +2379,14 @@ function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus,
               <div key={m.id} onClick={() => setViewingMed(m)} style={{ ...rowCardStyle, alignItems: 'flex-start' }}>
                 <div style={{ color: C.amber, marginTop: 2 }}><Syringe size={16} /></div>
                 <div style={{ flex: 1, marginLeft: 10 }}>
-                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{m.type}</div>
-                  <div style={{ fontSize: 11.5, color: C.sub, marginTop: 1 }}>{fmtDate(m.date)}{m.vet ? ` · ${m.vet}` : ''}</div>
-                  {m.medicine && <div style={{ fontSize: 12, color: C.ink, marginTop: 4 }}>Medicine: {m.medicine}</div>}
+                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 14.5, color: C.ink }}>{m.type}</div>
+                  <div style={{ fontSize: 13, color: C.sub, marginTop: 1 }}>{fmtDate(m.date)}{m.vet ? ` · ${m.vet}` : ''}</div>
+                  {m.medicine && <div style={{ fontSize: 13, color: C.ink, marginTop: 4 }}>Medicine: {m.medicine}</div>}
                   {m.nextDueDate && (
                     m.completed ? (
                       <div style={{ marginTop: 5 }}><Chip bg={C.greenSoft} fg={C.green}>Completed</Chip></div>
                     ) : (
-                      <div style={{ fontSize: 11, color: C.amber, marginTop: 4, fontWeight: 600 }}>Next due {fmtDateShort(m.nextDueDate)}</div>
+                      <div style={{ fontSize: 12.5, color: C.amber, marginTop: 4, fontWeight: 600 }}>Next due {fmtDateShort(m.nextDueDate)}</div>
                     )
                   )}
                 </div>
@@ -2268,8 +2406,8 @@ function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus,
               <div key={c.id} onClick={() => onOpenCow(c.id)} style={rowCardStyle}>
                 <EarTag number={c.tagNumber} size="sm" tone={earTagTone(c.status)} />
                 <div style={{ flex: 1, marginLeft: 10 }}>
-                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{c.name}</div>
-                  <div style={{ fontSize: 11.5, color: C.sub }}>
+                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 14.5, color: C.ink }}>{c.name}</div>
+                  <div style={{ fontSize: 13, color: C.sub }}>
                     {fmtDate(c.dob)}{c.birthWeight !== '' && c.birthWeight != null ? ` · ${c.birthWeight} kg at birth` : ''}
                   </div>
                 </div>
@@ -2286,7 +2424,7 @@ function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus,
 
       {confirmDel && (
         <Modal title="Remove this cow?" onClose={() => setConfirmDel(false)}>
-          <div style={{ fontSize: 13, color: C.sub, marginBottom: 14 }}>This deletes {cow.name}'s profile along with all of its milk, heat, and health records. This can't be undone.</div>
+          <div style={{ fontSize: 14, color: C.sub, marginBottom: 14 }}>This deletes {cow.name}'s profile along with all of its milk, heat, and health records. This can't be undone.</div>
           <PrimaryButton danger onClick={onDelete}>Delete permanently</PrimaryButton>
         </Modal>
       )}
@@ -2318,7 +2456,7 @@ function ListBlock({ items, empty, addLabel, onAdd, render }) {
   return (
     <div>
       {!isReadOnly && (
-        <button onClick={onAdd} className="ff-body" style={{ width: '100%', border: `1.5px dashed ${C.green}55`, background: C.greenSoft, color: C.green, borderRadius: 12, padding: '10px 0', fontWeight: 700, fontSize: 13, marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+        <button onClick={onAdd} className="ff-body" style={{ width: '100%', border: `1.5px dashed ${C.brand}66`, background: C.brandSoft, color: C.brand, borderRadius: 12, padding: '10px 0', fontWeight: 700, fontSize: 14, marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
           <Plus size={15} /> {addLabel}
         </button>
       )}
@@ -2366,10 +2504,10 @@ function MilkScreen({ cows, milk, cowById, onAdd, onExport, onUpdateMilk, onDele
       <div key={m.id} onClick={() => setViewing(m.cowId)} style={rowCardStyle}>
         {cow && <EarTag number={cow.tagNumber} size="sm" />}
         <div style={{ flex: 1, marginLeft: 10 }}>
-          <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{cow ? cow.name : 'Unknown'}</div>
-          <div style={{ fontSize: 11.5, fontWeight: 700, color: m.session === 'AM' ? C.milk : C.amber }}>{m.session} session</div>
+          <div className="ff-display" style={{ fontWeight: 700, fontSize: 14.5, color: C.ink }}>{cow ? cow.name : 'Unknown'}</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: m.session === 'AM' ? C.milk : C.amber }}>{m.session} session</div>
         </div>
-        <div className="ff-display" style={{ fontWeight: 700, fontSize: 15, color: C.milk }}>{m.liters} L</div>
+        <div className="ff-display" style={{ fontWeight: 700, fontSize: 16, color: C.milk }}>{m.liters} L</div>
         <ChevronRight size={16} color={C.grey} style={{ marginLeft: 6 }} />
       </div>
     );
@@ -2381,16 +2519,16 @@ function MilkScreen({ cows, milk, cowById, onAdd, onExport, onUpdateMilk, onDele
       <div key={r.cowId} onClick={() => setViewing(r.cowId)} style={{ ...rowCardStyle, alignItems: 'center' }}>
         {cow && <EarTag number={cow.tagNumber} size="sm" />}
         <div style={{ flex: 1, marginLeft: 10 }}>
-          <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{cow ? cow.name : 'Unknown'}</div>
-          <div className="ff-body" style={{ fontSize: 12, marginTop: 2, fontWeight: 700 }}>
+          <div className="ff-display" style={{ fontWeight: 700, fontSize: 14.5, color: C.ink }}>{cow ? cow.name : 'Unknown'}</div>
+          <div className="ff-body" style={{ fontSize: 13, marginTop: 2, fontWeight: 700 }}>
             <span style={{ color: C.milk }}>AM {r.am != null ? `${r.am} L` : '—'}</span>
             <span style={{ color: C.sub, fontWeight: 500 }}> &nbsp;·&nbsp; </span>
             <span style={{ color: C.amber }}>PM {r.pm != null ? `${r.pm} L` : '—'}</span>
           </div>
         </div>
         <div style={{ textAlign: 'center', background: C.milkSoft, borderRadius: 10, padding: '6px 10px', marginRight: 4 }}>
-          <div className="ff-display" style={{ fontWeight: 700, fontSize: 17, color: C.milk }}>{r.total.toFixed(1)} L</div>
-          <div style={{ fontSize: 9.5, color: C.milk, fontWeight: 600, opacity: 0.8 }}>total</div>
+          <div className="ff-display" style={{ fontWeight: 700, fontSize: 19, color: C.milk }}>{r.total.toFixed(1)} L</div>
+          <div style={{ fontSize: 11, color: C.milk, fontWeight: 600, opacity: 0.8 }}>total</div>
         </div>
         <ChevronRight size={16} color={C.grey} />
       </div>
@@ -2419,25 +2557,25 @@ function MilkScreen({ cows, milk, cowById, onAdd, onExport, onUpdateMilk, onDele
         {sessionFilter === 'Both' ? (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 16 }}>
             <div style={{ background: C.milkSoft, borderRadius: 12, padding: '10px 8px', textAlign: 'center' }}>
-              <div style={{ fontSize: 10.5, color: C.milk, fontWeight: 600 }}>AM total</div>
-              <div className="ff-display" style={{ fontSize: 17, fontWeight: 700, color: C.milk }}>{amTotal.toFixed(1)} L</div>
+              <div style={{ fontSize: 12, color: C.milk, fontWeight: 600 }}>AM total</div>
+              <div className="ff-display" style={{ fontSize: 19, fontWeight: 700, color: C.milk }}>{amTotal.toFixed(1)} L</div>
             </div>
             <div style={{ background: C.milkSoft, borderRadius: 12, padding: '10px 8px', textAlign: 'center' }}>
-              <div style={{ fontSize: 10.5, color: C.milk, fontWeight: 600 }}>PM total</div>
-              <div className="ff-display" style={{ fontSize: 17, fontWeight: 700, color: C.milk }}>{pmTotal.toFixed(1)} L</div>
+              <div style={{ fontSize: 12, color: C.milk, fontWeight: 600 }}>PM total</div>
+              <div className="ff-display" style={{ fontSize: 19, fontWeight: 700, color: C.milk }}>{pmTotal.toFixed(1)} L</div>
             </div>
             <div style={{ background: C.milk, borderRadius: 12, padding: '10px 8px', textAlign: 'center' }}>
-              <div style={{ fontSize: 10.5, color: '#fff', fontWeight: 600, opacity: 0.85 }}>Day total</div>
-              <div className="ff-display" style={{ fontSize: 17, fontWeight: 700, color: '#fff' }}>{total.toFixed(1)} L</div>
+              <div style={{ fontSize: 12, color: '#fff', fontWeight: 600, opacity: 0.85 }}>Day total</div>
+              <div className="ff-display" style={{ fontSize: 19, fontWeight: 700, color: '#fff' }}>{total.toFixed(1)} L</div>
             </div>
           </div>
         ) : (
           <div style={{ background: C.milkSoft, borderRadius: 14, padding: 14, marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
-              <div className="ff-body" style={{ fontSize: 11.5, color: C.milk, fontWeight: 600 }}>
+              <div className="ff-body" style={{ fontSize: 13, color: C.milk, fontWeight: 600 }}>
                 Total for {fmtDate(date)} · {sessionFilter}
               </div>
-              <div className="ff-display" style={{ fontSize: 24, fontWeight: 700, color: C.milk }}>{total.toFixed(1)} L</div>
+              <div className="ff-display" style={{ fontSize: 26, fontWeight: 700, color: C.milk }}>{total.toFixed(1)} L</div>
             </div>
             <Droplet size={26} color={C.milk} />
           </div>
@@ -2503,8 +2641,8 @@ function HeatScreen({ cows, heat, heatStatusFor, cowById, onAdd, onOpenCow, onEd
               <div key={cow.id} onClick={() => onOpenCow(cow.id)} style={rowCardStyle}>
                 <EarTag number={cow.tagNumber} size="sm" />
                 <div style={{ flex: 1, marginLeft: 10 }}>
-                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{cow.name}</div>
-                  <div style={{ fontSize: 11.5, color: C.sub }}>
+                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 14.5, color: C.ink }}>{cow.name}</div>
+                  <div style={{ fontSize: 13, color: C.sub }}>
                     {status === 'pregnant' ? 'Pregnancy confirmed' : status === 'none' ? 'No heat recorded yet' : status === 'overdue' ? `Overdue by ${Math.abs(daysUntil)}d · expected ${fmtDateShort(nextDate)}` : `Next expected ${fmtDateShort(nextDate)}`}
                   </div>
                 </div>
@@ -2532,8 +2670,8 @@ function HeatScreen({ cows, heat, heatStatusFor, cowById, onAdd, onOpenCow, onEd
                 <div key={h.id} onClick={() => setViewing(h)} style={rowCardStyle}>
                   <div style={{ color: C.rust }}><HeartPulse size={16} /></div>
                   <div style={{ flex: 1, marginLeft: 10 }}>
-                    <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{cow ? cow.name : 'Unknown'}</div>
-                    <div style={{ fontSize: 11.5, color: C.sub }}>{fmtDate(h.date)}{h.notes ? ` · ${h.notes}` : ''}</div>
+                    <div className="ff-display" style={{ fontWeight: 700, fontSize: 14, color: C.ink }}>{cow ? cow.name : 'Unknown'}</div>
+                    <div style={{ fontSize: 13, color: C.sub }}>{fmtDate(h.date)}{h.notes ? ` · ${h.notes}` : ''}</div>
                   </div>
                   {h.bred && <Chip bg={C.greenSoft} fg={C.green}>Bred</Chip>}
                   <ChevronRight size={16} color={C.grey} />
@@ -2577,7 +2715,7 @@ function MilkDetailModal({ cow, date, amRecord, pmRecord, onUpdate, onDelete, on
   if (confirmDel) {
     return (
       <Modal title="Delete this entry?" onClose={() => setConfirmDel(null)}>
-        <div style={{ fontSize: 13, color: C.sub, marginBottom: 14 }}>
+        <div style={{ fontSize: 14, color: C.sub, marginBottom: 14 }}>
           This removes the {confirmDel.session} milk entry ({confirmDel.liters} L) for {fmtDate(date)}. This can't be undone.
         </div>
         <PrimaryButton danger onClick={() => { onDelete(confirmDel.id); setConfirmDel(null); onClose(); }}>Delete permanently</PrimaryButton>
@@ -2591,24 +2729,24 @@ function MilkDetailModal({ cow, date, amRecord, pmRecord, onUpdate, onDelete, on
     if (!record) {
       return (
         <div style={{ background: '#fff', border: `1px solid ${C.line}`, borderRadius: 12, padding: 12, display: 'flex', alignItems: 'center' }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: tone }}>{label}</div>
-          <div style={{ flex: 1, marginLeft: 10, fontSize: 12, color: C.sub }}>Not logged</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: tone }}>{label}</div>
+          <div style={{ flex: 1, marginLeft: 10, fontSize: 13, color: C.sub }}>Not logged</div>
         </div>
       );
     }
     const isEditing = editingSession === label;
     return (
       <div style={{ background: toneSoft, borderRadius: 12, padding: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: tone, width: 28 }}>{label}</div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: tone, width: 28 }}>{label}</div>
         <div style={{ flex: 1 }}>
           {isEditing ? (
             <input type="number" min={0} step="0.1" value={value} onChange={(e) => setValue(e.target.value)} style={{ ...inputStyle, padding: '7px 10px' }} autoFocus />
           ) : (
-            <div className="ff-display" style={{ fontWeight: 700, fontSize: 17, color: tone }}>{record.liters} L</div>
+            <div className="ff-display" style={{ fontWeight: 700, fontSize: 19, color: tone }}>{record.liters} L</div>
           )}
         </div>
         {isEditing ? (
-          <button onClick={() => saveEdit(record)} className="ff-body" style={{ background: C.green, color: '#fff', border: 'none', borderRadius: 8, padding: '7px 12px', fontSize: 12, fontWeight: 700 }}>
+          <button onClick={() => saveEdit(record)} className="ff-body" style={{ background: C.brand, color: '#fff', border: 'none', borderRadius: 8, padding: '7px 12px', fontSize: 13, fontWeight: 700 }}>
             Save
           </button>
         ) : (
@@ -2627,8 +2765,8 @@ function MilkDetailModal({ cow, date, amRecord, pmRecord, onUpdate, onDelete, on
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
           <EarTag number={cow.tagNumber} size="sm" />
           <div>
-            <div className="ff-display" style={{ fontWeight: 700, fontSize: 14, color: C.ink }}>{cow.name}</div>
-            <div style={{ fontSize: 11.5, color: C.sub }}>{fmtDate(date)}</div>
+            <div className="ff-display" style={{ fontWeight: 700, fontSize: 15, color: C.ink }}>{cow.name}</div>
+            <div style={{ fontSize: 13, color: C.sub }}>{fmtDate(date)}</div>
           </div>
         </div>
       )}
@@ -2647,7 +2785,7 @@ function HeatDetailModal({ record, cow, onClose, onEdit, onDelete }) {
   if (confirmDel) {
     return (
       <Modal title="Delete this heat record?" onClose={() => setConfirmDel(false)}>
-        <div style={{ fontSize: 13, color: C.sub, marginBottom: 14 }}>This removes the heat cycle entry from {fmtDate(record.date)}. This can't be undone.</div>
+        <div style={{ fontSize: 14, color: C.sub, marginBottom: 14 }}>This removes the heat cycle entry from {fmtDate(record.date)}. This can't be undone.</div>
         <PrimaryButton danger onClick={() => onDelete(record)}>Delete permanently</PrimaryButton>
       </Modal>
     );
@@ -2658,8 +2796,8 @@ function HeatDetailModal({ record, cow, onClose, onEdit, onDelete }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
           <EarTag number={cow.tagNumber} size="sm" />
           <div>
-            <div className="ff-display" style={{ fontWeight: 700, fontSize: 14, color: C.ink }}>{cow.name}</div>
-            <div style={{ fontSize: 11.5, color: C.sub }}>{cow.breed}</div>
+            <div className="ff-display" style={{ fontWeight: 700, fontSize: 15, color: C.ink }}>{cow.name}</div>
+            <div style={{ fontSize: 13, color: C.sub }}>{cow.breed}</div>
           </div>
         </div>
       )}
@@ -2670,10 +2808,10 @@ function HeatDetailModal({ record, cow, onClose, onEdit, onDelete }) {
       </div>
       {!isReadOnly && (
         <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={() => onEdit(record)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.greenSoft, color: C.green, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 13, fontWeight: 700 }}>
+          <button onClick={() => onEdit(record)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.brandSoft, color: C.brand, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 14, fontWeight: 700 }}>
             <Pencil size={14} /> Edit
           </button>
-          <button onClick={() => setConfirmDel(true)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.rustSoft, color: C.rust, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 13, fontWeight: 700 }}>
+          <button onClick={() => setConfirmDel(true)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.rustSoft, color: C.rust, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 14, fontWeight: 700 }}>
             <Trash2 size={14} /> Delete
           </button>
         </div>
@@ -2694,7 +2832,7 @@ function HealthDetailModal({ record, cow, onClose, onSaveComplete, onEdit, onDel
   if (confirmDel) {
     return (
       <Modal title="Delete this health record?" onClose={() => setConfirmDel(false)}>
-        <div style={{ fontSize: 13, color: C.sub, marginBottom: 14 }}>This removes the {record.type.toLowerCase()} record from {fmtDate(record.date)}. This can't be undone.</div>
+        <div style={{ fontSize: 14, color: C.sub, marginBottom: 14 }}>This removes the {record.type.toLowerCase()} record from {fmtDate(record.date)}. This can't be undone.</div>
         <PrimaryButton danger onClick={() => onDelete(record)}>Delete permanently</PrimaryButton>
       </Modal>
     );
@@ -2721,8 +2859,8 @@ function HealthDetailModal({ record, cow, onClose, onSaveComplete, onEdit, onDel
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
           <EarTag number={cow.tagNumber} size="sm" />
           <div>
-            <div className="ff-display" style={{ fontWeight: 700, fontSize: 14, color: C.ink }}>{cow.name}</div>
-            <div style={{ fontSize: 11.5, color: C.sub }}>{cow.breed}</div>
+            <div className="ff-display" style={{ fontWeight: 700, fontSize: 15, color: C.ink }}>{cow.name}</div>
+            <div style={{ fontSize: 13, color: C.sub }}>{cow.breed}</div>
           </div>
         </div>
       )}
@@ -2734,17 +2872,17 @@ function HealthDetailModal({ record, cow, onClose, onSaveComplete, onEdit, onDel
         {record.vet && <DetailRow label="Vet / attended by" value={record.vet} />}
         {record.nextDueDate && (
           <div>
-            <div className="ff-body" style={{ fontSize: 11, fontWeight: 600, color: C.sub, marginBottom: 2 }}>Next follow-up</div>
-            <div className="ff-body" style={{ fontSize: 13.5, color: C.ink, lineHeight: 1.5 }}>{fmtDate(record.nextDueDate)}</div>
+            <div className="ff-body" style={{ fontSize: 12.5, fontWeight: 600, color: C.sub, marginBottom: 2 }}>Next follow-up</div>
+            <div className="ff-body" style={{ fontSize: 14.5, color: C.ink, lineHeight: 1.5 }}>{fmtDate(record.nextDueDate)}</div>
           </div>
         )}
       </div>
       {!isReadOnly && (
         <div style={{ display: 'flex', gap: 8, marginBottom: record.nextDueDate ? 12 : 0 }}>
-          <button onClick={() => onEdit(record)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.greenSoft, color: C.green, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 13, fontWeight: 700 }}>
+          <button onClick={() => onEdit(record)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.brandSoft, color: C.brand, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 14, fontWeight: 700 }}>
             <Pencil size={14} /> Edit
           </button>
-          <button onClick={() => setConfirmDel(true)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.rustSoft, color: C.rust, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 13, fontWeight: 700 }}>
+          <button onClick={() => setConfirmDel(true)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.rustSoft, color: C.rust, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 14, fontWeight: 700 }}>
             <Trash2 size={14} /> Delete
           </button>
         </div>
@@ -2764,10 +2902,10 @@ function HealthDetailModal({ record, cow, onClose, onSaveComplete, onEdit, onDel
             <div style={{ width: 20, height: 20, borderRadius: 6, border: `1.5px solid ${completed ? C.green : C.grey}`, background: completed ? C.green : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
               {completed && <Check size={13} color="#fff" />}
             </div>
-            <span style={{ fontSize: 13.5, fontWeight: 600, color: completed ? C.green : C.ink }}>This follow-up is completed</span>
+            <span style={{ fontSize: 14.5, fontWeight: 600, color: completed ? C.green : C.ink }}>This follow-up is completed</span>
           </button>
 
-          {error && <div style={{ background: C.rustSoft, color: C.rust, borderRadius: 10, padding: 10, fontSize: 12.5, marginBottom: 12 }}>{error}</div>}
+          {error && <div style={{ background: C.rustSoft, color: C.rust, borderRadius: 10, padding: 10, fontSize: 13.5, marginBottom: 12 }}>{error}</div>}
 
           <PrimaryButton disabled={busy || !dirty} onClick={save}>
             {busy ? 'Saving…' : saved ? 'Saved ✓' : 'Save'}
@@ -2781,8 +2919,8 @@ function HealthDetailModal({ record, cow, onClose, onSaveComplete, onEdit, onDel
 function DetailRow({ label, value }) {
   return (
     <div>
-      <div className="ff-body" style={{ fontSize: 11, fontWeight: 600, color: C.sub, marginBottom: 2 }}>{label}</div>
-      <div className="ff-body" style={{ fontSize: 13.5, color: C.ink, lineHeight: 1.5 }}>{value}</div>
+      <div className="ff-body" style={{ fontSize: 12.5, fontWeight: 600, color: C.sub, marginBottom: 2 }}>{label}</div>
+      <div className="ff-body" style={{ fontSize: 14.5, color: C.ink, lineHeight: 1.5 }}>{value}</div>
     </div>
   );
 }
@@ -2835,9 +2973,9 @@ function HealthScreen({
                 <div key={m.id} onClick={() => setViewing(m)} style={{ ...rowCardStyle, alignItems: 'flex-start' }}>
                   {cow && <EarTag number={cow.tagNumber} size="sm" />}
                   <div style={{ flex: 1, marginLeft: 10 }}>
-                    <div className="ff-display" style={{ fontWeight: 700, fontSize: 13.5, color: C.ink }}>{cow ? cow.name : 'Unknown'} · {m.type}</div>
-                    <div style={{ fontSize: 11.5, color: C.sub, marginTop: 1 }}>{fmtDate(m.date)}{m.vet ? ` · ${m.vet}` : ''}</div>
-                    {m.medicine && <div style={{ fontSize: 12, color: C.ink, marginTop: 4 }}>Medicine: {m.medicine}</div>}
+                    <div className="ff-display" style={{ fontWeight: 700, fontSize: 14.5, color: C.ink }}>{cow ? cow.name : 'Unknown'} · {m.type}</div>
+                    <div style={{ fontSize: 13, color: C.sub, marginTop: 1 }}>{fmtDate(m.date)}{m.vet ? ` · ${m.vet}` : ''}</div>
+                    {m.medicine && <div style={{ fontSize: 13, color: C.ink, marginTop: 4 }}>Medicine: {m.medicine}</div>}
                     {m.nextDueDate && (
                       <div style={{ marginTop: 5 }}>
                         {m.completed ? (
@@ -2911,8 +3049,8 @@ function MedicineStockView({ medicineTypes, medicineTransactions, onBackToRecord
                 <div key={mt.id} style={{ background: '#fff', border: `1px solid ${C.line}`, borderRadius: 14, padding: 14 }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
                     <div>
-                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 14.5, color: C.ink }}>{mt.name}</div>
-                      <div style={{ fontSize: 11.5, color: C.sub, marginTop: 1 }}>{mt.costPerUnit ? `₹${mt.costPerUnit} / ${mt.unit}` : mt.unit}</div>
+                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 15.5, color: C.ink }}>{mt.name}</div>
+                      <div style={{ fontSize: 13, color: C.sub, marginTop: 1 }}>{mt.costPerUnit ? `₹${mt.costPerUnit} / ${mt.unit}` : mt.unit}</div>
                     </div>
                     {!isReadOnly && (
                       <div style={{ display: 'flex', gap: 6 }}>
@@ -2924,16 +3062,16 @@ function MedicineStockView({ medicineTypes, medicineTransactions, onBackToRecord
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, margin: '12px 0' }}>
                     <div>
-                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 17, color: outOfStock ? C.rust : low ? C.amber : C.ink }}>{stock}</div>
-                      <div style={{ fontSize: 10.5, color: C.sub }}>{mt.unit} left</div>
+                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 19, color: outOfStock ? C.rust : low ? C.amber : C.ink }}>{stock}</div>
+                      <div style={{ fontSize: 12, color: C.sub }}>{mt.unit} left</div>
                     </div>
                     <div>
-                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 15, color: C.ink }}>{purchasedAll}</div>
-                      <div style={{ fontSize: 10.5, color: C.sub }}>Purchased</div>
+                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 16, color: C.ink }}>{purchasedAll}</div>
+                      <div style={{ fontSize: 12, color: C.sub }}>Purchased</div>
                     </div>
                     <div>
-                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 15, color: C.ink }}>{usedAll}</div>
-                      <div style={{ fontSize: 10.5, color: C.sub }}>Used</div>
+                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 16, color: C.ink }}>{usedAll}</div>
+                      <div style={{ fontSize: 12, color: C.sub }}>Used</div>
                     </div>
                   </div>
 
@@ -2947,10 +3085,10 @@ function MedicineStockView({ medicineTypes, medicineTransactions, onBackToRecord
 
                   {!isReadOnly && (
                     <div style={{ display: 'flex', gap: 8 }}>
-                      <button onClick={() => onLogTxn(mt.id, 'purchase')} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, background: C.greenSoft, color: C.green, border: 'none', borderRadius: 9, padding: '8px 0', fontSize: 12, fontWeight: 700 }}>
+                      <button onClick={() => onLogTxn(mt.id, 'purchase')} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, background: C.greenSoft, color: C.green, border: 'none', borderRadius: 9, padding: '8px 0', fontSize: 13, fontWeight: 700 }}>
                         <PackagePlus size={13} /> Log purchase
                       </button>
-                      <button onClick={() => onLogTxn(mt.id, 'usage')} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, background: C.greySoft, color: C.ink, border: 'none', borderRadius: 9, padding: '8px 0', fontSize: 12, fontWeight: 700 }}>
+                      <button onClick={() => onLogTxn(mt.id, 'usage')} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, background: C.greySoft, color: C.ink, border: 'none', borderRadius: 9, padding: '8px 0', fontSize: 13, fontWeight: 700 }}>
                         <PackageMinus size={13} /> Log usage
                       </button>
                     </div>
@@ -2974,8 +3112,8 @@ function MedicineStockView({ medicineTypes, medicineTransactions, onBackToRecord
                     {t.kind === 'purchase' ? <PackagePlus size={16} /> : <PackageMinus size={16} />}
                   </div>
                   <div style={{ flex: 1, marginLeft: 10 }}>
-                    <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{mt ? mt.name : 'Unknown'} · {t.quantity} {mt ? mt.unit : ''}</div>
-                    <div style={{ fontSize: 11.5, color: C.sub }}>{fmtDate(t.date)} · {t.kind === 'purchase' ? `Purchased${t.cost ? ` · ₹${t.cost}` : ''}` : 'Used'}</div>
+                    <div className="ff-display" style={{ fontWeight: 700, fontSize: 14, color: C.ink }}>{mt ? mt.name : 'Unknown'} · {t.quantity} {mt ? mt.unit : ''}</div>
+                    <div style={{ fontSize: 13, color: C.sub }}>{fmtDate(t.date)} · {t.kind === 'purchase' ? `Purchased${t.cost ? ` · ₹${t.cost}` : ''}` : 'Used'}</div>
                   </div>
                   <ChevronRight size={16} color={C.grey} />
                 </div>
@@ -3008,7 +3146,7 @@ function ClearableDate({ value, onChange, max }) {
           type="button"
           onClick={() => onChange('')}
           className="ff-body"
-          style={{ background: C.greySoft, border: 'none', borderRadius: 9, padding: '10px 12px', fontSize: 12, fontWeight: 700, color: C.ink, flexShrink: 0 }}
+          style={{ background: C.greySoft, border: 'none', borderRadius: 9, padding: '10px 12px', fontSize: 13, fontWeight: 700, color: C.ink, flexShrink: 0 }}
         >
           Clear
         </button>
@@ -3054,7 +3192,7 @@ function CowForm({ initial, defaultStatus, defaultMotherId, cows, onClose, onSav
           labels={{ active: 'Milking', dry: 'Dry', heifer: 'Heifer', calf: 'Calf', sold: 'Sold' }}
         />
         {isHeifer && (
-          <div className="ff-body" style={{ fontSize: 11, color: C.sub, marginTop: 6 }}>
+          <div className="ff-body" style={{ fontSize: 12.5, color: C.sub, marginTop: 6 }}>
             A heifer is a grown calf that's old enough to breed — she'll now show up in the Heat Cycles section.
           </div>
         )}
@@ -3090,7 +3228,7 @@ function CowForm({ initial, defaultStatus, defaultMotherId, cows, onClose, onSav
           </Field>
           <Field label="Inseminated on (optional)">
             <ClearableDate value={inseminatedOn} onChange={setInseminatedOn} max={todayStr()} />
-            <div className="ff-body" style={{ fontSize: 11, color: C.sub, marginTop: 5 }}>You'll get a reminder 20 days after this date to check for repeat heat / pregnancy.</div>
+            <div className="ff-body" style={{ fontSize: 12.5, color: C.sub, marginTop: 5 }}>You'll get a reminder 20 days after this date to check for repeat heat / pregnancy.</div>
           </Field>
           <Field label="Pregnancy confirmed?">
             <button
@@ -3102,12 +3240,12 @@ function CowForm({ initial, defaultStatus, defaultMotherId, cows, onClose, onSav
               <div style={{ width: 18, height: 18, borderRadius: 5, border: `1.5px solid ${pregnancyConfirmed ? C.green : C.grey}`, background: pregnancyConfirmed ? C.green : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 {pregnancyConfirmed && <Check size={12} color="#fff" />}
               </div>
-              <span className="ff-body" style={{ fontSize: 13, color: C.ink, fontWeight: 600 }}>
+              <span className="ff-body" style={{ fontSize: 14, color: C.ink, fontWeight: 600 }}>
                 {inseminatedOn ? 'Yes, pregnancy confirmed' : 'Add an insemination date first'}
               </span>
             </button>
             {expectedCalving && (
-              <div className="ff-body" style={{ fontSize: 12, color: C.green, marginTop: 8, background: C.greenSoft, borderRadius: 9, padding: '8px 10px' }}>
+              <div className="ff-body" style={{ fontSize: 13, color: C.green, marginTop: 8, background: C.greenSoft, borderRadius: 9, padding: '8px 10px' }}>
                 Expected calving: <strong>{fmtDate(expectedCalving)}</strong> (9 months from insemination)
               </div>
             )}
@@ -3130,7 +3268,7 @@ function CowForm({ initial, defaultStatus, defaultMotherId, cows, onClose, onSav
           <div style={{ width: 18, height: 18, borderRadius: 5, border: `1.5px solid ${insured ? C.green : C.grey}`, background: insured ? C.green : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             {insured && <Check size={12} color="#fff" />}
           </div>
-          <span className="ff-body" style={{ fontSize: 13, color: C.ink, fontWeight: 600 }}>Yes, this animal is insured</span>
+          <span className="ff-body" style={{ fontSize: 14, color: C.ink, fontWeight: 600 }}>Yes, this animal is insured</span>
         </button>
       </Field>
       {insured && (
@@ -3140,7 +3278,7 @@ function CowForm({ initial, defaultStatus, defaultMotherId, cows, onClose, onSav
           </Field>
           <Field label="Insurance expiry date (optional)">
             <ClearableDate value={insuranceExpiryDate} onChange={setInsuranceExpiryDate} />
-            <div className="ff-body" style={{ fontSize: 11, color: C.sub, marginTop: 5 }}>You'll see a reminder starting 1 month before this date.</div>
+            <div className="ff-body" style={{ fontSize: 12.5, color: C.sub, marginTop: 5 }}>You'll see a reminder starting 1 month before this date.</div>
           </Field>
         </>
       )}
@@ -3192,7 +3330,7 @@ function MilkForm({ cows, milk, defaultCowId, onClose, onSave }) {
       <Field label="Session"><Segmented options={['AM', 'PM']} value={session} onChange={setSession} /></Field>
       <Field label="Liters"><input type="number" min={0} step="0.1" value={liters} onChange={(e) => setLiters(e.target.value)} placeholder="e.g. 8.5" style={inputStyle} /></Field>
       {existing && (
-        <div className="ff-body" style={{ fontSize: 11.5, color: C.sub, marginTop: -8, marginBottom: 14 }}>
+        <div className="ff-body" style={{ fontSize: 13, color: C.sub, marginTop: -8, marginBottom: 14 }}>
           Already logged for this session — saving will update this entry instead of creating a new one.
         </div>
       )}
@@ -3270,7 +3408,7 @@ function MilkBatchForm({ cows, milk, onClose, onSave }) {
 
           {mode === 'Total (herd)' ? (
             <>
-              <div className="ff-body" style={{ fontSize: 11, fontWeight: 600, color: C.sub, marginBottom: 6 }}>
+              <div className="ff-body" style={{ fontSize: 12.5, fontWeight: 600, color: C.sub, marginBottom: 6 }}>
                 No time to record each cow? Enter the total milk collected and it'll be split evenly across all {cows.length} active cows.
               </div>
               <Field label={`Total liters — all cows, ${session} session`}>
@@ -3282,12 +3420,12 @@ function MilkBatchForm({ cows, milk, onClose, onSave }) {
                 />
               </Field>
               {existingCountForSession > 0 && (
-                <div className="ff-body" style={{ fontSize: 11.5, color: C.rust, marginTop: -8, marginBottom: 14 }}>
+                <div className="ff-body" style={{ fontSize: 13, color: C.rust, marginTop: -8, marginBottom: 14 }}>
                   {existingCountForSession} cow{existingCountForSession > 1 ? 's already have' : ' already has'} an entry for this date and session — saving will overwrite {existingCountForSession > 1 ? 'them' : 'it'} with the split amount.
                 </div>
               )}
               {totalLiters !== '' && !isNaN(Number(totalLiters)) && Number(totalLiters) >= 0 && (
-                <div style={{ background: C.milkSoft, borderRadius: 10, padding: '8px 12px', marginBottom: 14, display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+                <div style={{ background: C.milkSoft, borderRadius: 10, padding: '8px 12px', marginBottom: 14, display: 'flex', justifyContent: 'space-between', fontSize: 13.5 }}>
                   <span style={{ color: C.milk, fontWeight: 600 }}>≈ {(Number(totalLiters) / cows.length).toFixed(2)} L / cow</span>
                   <span style={{ color: C.milk, fontWeight: 700 }}>{Number(totalLiters).toFixed(1)} L total</span>
                 </div>
@@ -3295,7 +3433,7 @@ function MilkBatchForm({ cows, milk, onClose, onSave }) {
             </>
           ) : (
             <>
-              <div className="ff-body" style={{ fontSize: 11, fontWeight: 600, color: C.sub, marginBottom: 6 }}>
+              <div className="ff-body" style={{ fontSize: 12.5, fontWeight: 600, color: C.sub, marginBottom: 6 }}>
                 Enter liters for each cow — leave blank to skip a cow for this session.
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
@@ -3303,19 +3441,19 @@ function MilkBatchForm({ cows, milk, onClose, onSave }) {
                   <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: `1px solid ${C.line}`, borderRadius: 10, padding: '8px 10px' }}>
                     <EarTag number={c.tagNumber} size="sm" />
                     <div style={{ flex: 1 }}>
-                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{c.name}</div>
-                      <div style={{ fontSize: 10.5, color: C.sub }}>{c.status !== 'active' ? c.status : '\u00A0'}</div>
+                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 14, color: C.ink }}>{c.name}</div>
+                      <div style={{ fontSize: 12, color: C.sub }}>{c.status !== 'active' ? c.status : '\u00A0'}</div>
                     </div>
                     <input
                       type="number" min={0} step="0.1" placeholder="—" value={values[c.id] ?? ''}
                       onChange={(e) => setVal(c.id, e.target.value)}
                       style={{ ...inputStyle, width: 76, textAlign: 'right', padding: '8px 10px' }}
                     />
-                    <span className="ff-body" style={{ fontSize: 12, color: C.sub }}>L</span>
+                    <span className="ff-body" style={{ fontSize: 13, color: C.sub }}>L</span>
                   </div>
                 ))}
               </div>
-              <div style={{ background: C.milkSoft, borderRadius: 10, padding: '8px 12px', marginBottom: 14, display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+              <div style={{ background: C.milkSoft, borderRadius: 10, padding: '8px 12px', marginBottom: 14, display: 'flex', justifyContent: 'space-between', fontSize: 13.5 }}>
                 <span style={{ color: C.milk, fontWeight: 600 }}>{filledCount} of {cows.length} cows entered</span>
                 <span style={{ color: C.milk, fontWeight: 700 }}>{total.toFixed(1)} L total</span>
               </div>
@@ -3351,7 +3489,7 @@ function HeatForm({ cows, defaultCowId, initial, onClose, onSave }) {
           <div style={{ width: 18, height: 18, borderRadius: 5, border: `1.5px solid ${bred ? C.green : C.grey}`, background: bred ? C.green : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             {bred && <Check size={12} color="#fff" />}
           </div>
-          <span className="ff-body" style={{ fontSize: 13, color: C.ink, fontWeight: 600 }}>Yes, bred / inseminated</span>
+          <span className="ff-body" style={{ fontSize: 14, color: C.ink, fontWeight: 600 }}>Yes, bred / inseminated</span>
         </button>
       </Field>
       <Field label="Notes (optional)"><input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. mild signs, standing heat" style={inputStyle} /></Field>
@@ -3385,7 +3523,7 @@ function MedicalForm({ cows, defaultCowId, initial, onClose, onSave }) {
             {selectable.map((c) => <option key={c.id} value={c.id}>{c.name} (#{c.tagNumber})</option>)}
           </select>
           {cowSelection === ALL_COWS && (
-            <div className="ff-body" style={{ fontSize: 11.5, color: C.sub, marginTop: 6 }}>
+            <div className="ff-body" style={{ fontSize: 13, color: C.sub, marginTop: 6 }}>
               A separate record will be saved for each of the {selectable.length} cows.
             </div>
           )}
@@ -3395,8 +3533,8 @@ function MedicalForm({ cows, defaultCowId, initial, onClose, onSave }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
           <EarTag number={cow.tagNumber} size="sm" />
           <div>
-            <div className="ff-display" style={{ fontWeight: 700, fontSize: 14, color: C.ink }}>{cow.name}</div>
-            <div style={{ fontSize: 11.5, color: C.sub }}>{cow.breed}</div>
+            <div className="ff-display" style={{ fontWeight: 700, fontSize: 15, color: C.ink }}>{cow.name}</div>
+            <div style={{ fontSize: 13, color: C.sub }}>{cow.breed}</div>
           </div>
         </div>
       )}
@@ -3450,8 +3588,8 @@ function FeedScreen({ feedTypes, feedTransactions, onAddType, onEditType, onDele
             </div>
             <div style={{ background: C.brownSoft, borderRadius: 14, padding: 14, marginBottom: 18, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div>
-                <div className="ff-body" style={{ fontSize: 11.5, color: C.brown, fontWeight: 600 }}>Feed spend this month</div>
-                <div className="ff-display" style={{ fontSize: 24, fontWeight: 700, color: C.brown }}>₹{totalSpendThisMonth.toFixed(0)}</div>
+                <div className="ff-body" style={{ fontSize: 13, color: C.brown, fontWeight: 600 }}>Feed spend this month</div>
+                <div className="ff-display" style={{ fontSize: 26, fontWeight: 700, color: C.brown }}>₹{totalSpendThisMonth.toFixed(0)}</div>
               </div>
               <Wheat size={26} color={C.brown} />
             </div>
@@ -3476,8 +3614,8 @@ function FeedScreen({ feedTypes, feedTransactions, onAddType, onEditType, onDele
                 <div key={f.id} style={{ background: '#fff', border: `1px solid ${C.line}`, borderRadius: 14, padding: 14 }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
                     <div>
-                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 14.5, color: C.ink }}>{f.name}</div>
-                      <div style={{ fontSize: 11.5, color: C.sub, marginTop: 1 }}>₹{f.costPerBag} / bag</div>
+                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 15.5, color: C.ink }}>{f.name}</div>
+                      <div style={{ fontSize: 13, color: C.sub, marginTop: 1 }}>₹{f.costPerBag} / bag</div>
                     </div>
                     <div style={{ display: 'flex', gap: 6 }}>
                       {!isReadOnly && (
@@ -3491,40 +3629,40 @@ function FeedScreen({ feedTypes, feedTransactions, onAddType, onEditType, onDele
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 12 }}>
                     <div>
-                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 17, color: low ? C.rust : C.ink }}>{stock}</div>
-                      <div style={{ fontSize: 10.5, color: C.sub }}>Bags left</div>
+                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 19, color: low ? C.rust : C.ink }}>{stock}</div>
+                      <div style={{ fontSize: 12, color: C.sub }}>Bags left</div>
                     </div>
                     <div>
-                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 17, color: C.ink }}>{purchasedAll}</div>
-                      <div style={{ fontSize: 10.5, color: C.sub }}>Purchased (total)</div>
+                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 19, color: C.ink }}>{purchasedAll}</div>
+                      <div style={{ fontSize: 12, color: C.sub }}>Purchased (total)</div>
                     </div>
                     <div>
-                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 17, color: C.ink }}>{usedAll}</div>
-                      <div style={{ fontSize: 10.5, color: C.sub }}>Used (total)</div>
+                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 19, color: C.ink }}>{usedAll}</div>
+                      <div style={{ fontSize: 12, color: C.sub }}>Used (total)</div>
                     </div>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, margin: '10px 0 12px' }}>
                     <div>
-                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 15, color: C.ink }}>{boughtThisMonth}</div>
-                      <div style={{ fontSize: 10.5, color: C.sub }}>Bought this mo.</div>
+                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 16, color: C.ink }}>{boughtThisMonth}</div>
+                      <div style={{ fontSize: 12, color: C.sub }}>Bought this mo.</div>
                     </div>
                     <div>
-                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 15, color: C.rust }}>₹{debitedAll.toFixed(0)}</div>
-                      <div style={{ fontSize: 10.5, color: C.sub }}>Debited (total)</div>
+                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 16, color: C.rust }}>₹{debitedAll.toFixed(0)}</div>
+                      <div style={{ fontSize: 12, color: C.sub }}>Debited (total)</div>
                     </div>
                     <div>
-                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 15, color: C.milk }}>₹{savedAll.toFixed(0)}</div>
-                      <div style={{ fontSize: 10.5, color: C.sub }}>Stock value</div>
+                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 16, color: C.milk }}>₹{savedAll.toFixed(0)}</div>
+                      <div style={{ fontSize: 12, color: C.sub }}>Stock value</div>
                     </div>
                   </div>
 
                   {low && <div style={{ marginBottom: 10 }}><Chip bg={C.rustSoft} fg={C.rust}>Running low — consider restocking</Chip></div>}
                   {!isReadOnly && (
                     <div style={{ display: 'flex', gap: 8 }}>
-                      <button onClick={() => onLogTxn(f.id, 'purchase')} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, background: C.greenSoft, color: C.green, border: 'none', borderRadius: 9, padding: '8px 0', fontSize: 12, fontWeight: 700 }}>
+                      <button onClick={() => onLogTxn(f.id, 'purchase')} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, background: C.greenSoft, color: C.green, border: 'none', borderRadius: 9, padding: '8px 0', fontSize: 13, fontWeight: 700 }}>
                         <PackagePlus size={13} /> Log purchase
                       </button>
-                      <button onClick={() => onLogTxn(f.id, 'usage')} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, background: C.greySoft, color: C.ink, border: 'none', borderRadius: 9, padding: '8px 0', fontSize: 12, fontWeight: 700 }}>
+                      <button onClick={() => onLogTxn(f.id, 'usage')} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, background: C.greySoft, color: C.ink, border: 'none', borderRadius: 9, padding: '8px 0', fontSize: 13, fontWeight: 700 }}>
                         <PackageMinus size={13} /> Log usage
                       </button>
                     </div>
@@ -3548,8 +3686,8 @@ function FeedScreen({ feedTypes, feedTransactions, onAddType, onEditType, onDele
                     {t.kind === 'purchase' ? <PackagePlus size={16} /> : <PackageMinus size={16} />}
                   </div>
                   <div style={{ flex: 1, marginLeft: 10 }}>
-                    <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{f ? f.name : 'Unknown'} · {t.bags} bags</div>
-                    <div style={{ fontSize: 11.5, color: C.sub }}>{fmtDate(t.date)} · {t.kind === 'purchase' ? `Purchased${t.cost ? ` · ₹${t.cost}` : ''}` : 'Used'}</div>
+                    <div className="ff-display" style={{ fontWeight: 700, fontSize: 14, color: C.ink }}>{f ? f.name : 'Unknown'} · {t.bags} bags</div>
+                    <div style={{ fontSize: 13, color: C.sub }}>{fmtDate(t.date)} · {t.kind === 'purchase' ? `Purchased${t.cost ? ` · ₹${t.cost}` : ''}` : 'Used'}</div>
                   </div>
                   <ChevronRight size={16} color={C.grey} />
                 </div>
@@ -3620,7 +3758,7 @@ function FeedTxnDetailModal({ record, feedType, onClose, onUpdate, onDelete }) {
   if (confirmDel) {
     return (
       <Modal title="Delete this entry?" onClose={() => setConfirmDel(false)}>
-        <div style={{ fontSize: 13, color: C.sub, marginBottom: 14 }}>
+        <div style={{ fontSize: 14, color: C.sub, marginBottom: 14 }}>
           This removes this {record.kind} entry ({record.bags} bags) for {fmtDate(record.date)}. This can't be undone.
         </div>
         <PrimaryButton danger onClick={() => onDelete(record.id)}>Delete permanently</PrimaryButton>
@@ -3643,8 +3781,8 @@ function FeedTxnDetailModal({ record, feedType, onClose, onUpdate, onDelete }) {
           {record.kind === 'purchase' ? <PackagePlus size={18} /> : <PackageMinus size={18} />}
         </div>
         <div>
-          <div className="ff-display" style={{ fontWeight: 700, fontSize: 14, color: C.ink }}>{feedType ? feedType.name : 'Unknown feed'}</div>
-          <div style={{ fontSize: 11.5, color: C.sub }}>{fmtDate(record.date)}</div>
+          <div className="ff-display" style={{ fontWeight: 700, fontSize: 15, color: C.ink }}>{feedType ? feedType.name : 'Unknown feed'}</div>
+          <div style={{ fontSize: 13, color: C.sub }}>{fmtDate(record.date)}</div>
         </div>
       </div>
 
@@ -3665,10 +3803,10 @@ function FeedTxnDetailModal({ record, feedType, onClose, onUpdate, onDelete }) {
           </div>
           {!isReadOnly && (
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => setEditing(true)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.greenSoft, color: C.green, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 13, fontWeight: 700 }}>
+              <button onClick={() => setEditing(true)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.brandSoft, color: C.brand, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 14, fontWeight: 700 }}>
                 <Pencil size={14} /> Edit
               </button>
-              <button onClick={() => setConfirmDel(true)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.rustSoft, color: C.rust, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 13, fontWeight: 700 }}>
+              <button onClick={() => setConfirmDel(true)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.rustSoft, color: C.rust, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 14, fontWeight: 700 }}>
                 <Trash2 size={14} /> Delete
               </button>
             </div>
@@ -3743,7 +3881,7 @@ function MedicineTxnDetailModal({ record, medicineType, onClose, onUpdate, onDel
   if (confirmDel) {
     return (
       <Modal title="Delete this entry?" onClose={() => setConfirmDel(false)}>
-        <div style={{ fontSize: 13, color: C.sub, marginBottom: 14 }}>
+        <div style={{ fontSize: 14, color: C.sub, marginBottom: 14 }}>
           This removes this {record.kind} entry ({record.quantity} {medicineType ? medicineType.unit : 'units'}) for {fmtDate(record.date)}. This can't be undone.
         </div>
         <PrimaryButton danger onClick={() => onDelete(record.id)}>Delete permanently</PrimaryButton>
@@ -3766,8 +3904,8 @@ function MedicineTxnDetailModal({ record, medicineType, onClose, onUpdate, onDel
           {record.kind === 'purchase' ? <PackagePlus size={18} /> : <PackageMinus size={18} />}
         </div>
         <div>
-          <div className="ff-display" style={{ fontWeight: 700, fontSize: 14, color: C.ink }}>{medicineType ? medicineType.name : 'Unknown medicine'}</div>
-          <div style={{ fontSize: 11.5, color: C.sub }}>{fmtDate(record.date)}</div>
+          <div className="ff-display" style={{ fontWeight: 700, fontSize: 15, color: C.ink }}>{medicineType ? medicineType.name : 'Unknown medicine'}</div>
+          <div style={{ fontSize: 13, color: C.sub }}>{fmtDate(record.date)}</div>
         </div>
       </div>
 
@@ -3790,10 +3928,10 @@ function MedicineTxnDetailModal({ record, medicineType, onClose, onUpdate, onDel
           </div>
           {!isReadOnly && (
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => setEditing(true)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.greenSoft, color: C.green, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 13, fontWeight: 700 }}>
+              <button onClick={() => setEditing(true)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.brandSoft, color: C.brand, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 14, fontWeight: 700 }}>
                 <Pencil size={14} /> Edit
               </button>
-              <button onClick={() => setConfirmDel(true)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.rustSoft, color: C.rust, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 13, fontWeight: 700 }}>
+              <button onClick={() => setConfirmDel(true)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.rustSoft, color: C.rust, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 14, fontWeight: 700 }}>
                 <Trash2 size={14} /> Delete
               </button>
             </div>
@@ -3865,8 +4003,8 @@ function FinanceScreen({ financeEntries, feedTransactions, feedTypes, onAdd, onE
         </div>
         <div style={{ background: netThisMonth >= 0 ? C.greenSoft : C.rustSoft, borderRadius: 14, padding: 14, marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
-            <div className="ff-body" style={{ fontSize: 11.5, color: netThisMonth >= 0 ? C.green : C.rust, fontWeight: 600 }}>Net {netThisMonth >= 0 ? 'profit' : 'loss'} this month</div>
-            <div className="ff-display" style={{ fontSize: 24, fontWeight: 700, color: netThisMonth >= 0 ? C.green : C.rust }}>₹{Math.abs(netThisMonth).toFixed(0)}</div>
+            <div className="ff-body" style={{ fontSize: 13, color: netThisMonth >= 0 ? C.green : C.rust, fontWeight: 600 }}>Net {netThisMonth >= 0 ? 'profit' : 'loss'} this month</div>
+            <div className="ff-display" style={{ fontSize: 26, fontWeight: 700, color: netThisMonth >= 0 ? C.green : C.rust }}>₹{Math.abs(netThisMonth).toFixed(0)}</div>
           </div>
           <Wallet size={26} color={netThisMonth >= 0 ? C.green : C.rust} />
         </div>
@@ -3874,25 +4012,25 @@ function FinanceScreen({ financeEntries, feedTransactions, feedTypes, onAdd, onE
         <SectionTitle title="Expense breakdown" />
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 18 }}>
           <div style={{ background: '#fff', border: `1px solid ${C.line}`, borderRadius: 12, padding: '10px 8px', textAlign: 'center' }}>
-            <div style={{ fontSize: 10, color: C.sub, fontWeight: 600 }}>Feed</div>
-            <div className="ff-display" style={{ fontSize: 15, fontWeight: 700, color: C.ink }}>₹{feedThisMonth.toFixed(0)}</div>
+            <div style={{ fontSize: 11.5, color: C.sub, fontWeight: 600 }}>Feed</div>
+            <div className="ff-display" style={{ fontSize: 16, fontWeight: 700, color: C.ink }}>₹{feedThisMonth.toFixed(0)}</div>
           </div>
           <div style={{ background: '#fff', border: `1px solid ${C.line}`, borderRadius: 12, padding: '10px 8px', textAlign: 'center' }}>
-            <div style={{ fontSize: 10, color: C.sub, fontWeight: 600 }}>Medical</div>
-            <div className="ff-display" style={{ fontSize: 15, fontWeight: 700, color: C.ink }}>₹{medicalThisMonth.toFixed(0)}</div>
+            <div style={{ fontSize: 11.5, color: C.sub, fontWeight: 600 }}>Medical</div>
+            <div className="ff-display" style={{ fontSize: 16, fontWeight: 700, color: C.ink }}>₹{medicalThisMonth.toFixed(0)}</div>
           </div>
           <div style={{ background: '#fff', border: `1px solid ${C.line}`, borderRadius: 12, padding: '10px 8px', textAlign: 'center' }}>
-            <div style={{ fontSize: 10, color: C.sub, fontWeight: 600 }}>Other</div>
-            <div className="ff-display" style={{ fontSize: 15, fontWeight: 700, color: C.ink }}>₹{otherExpThisMonth.toFixed(0)}</div>
+            <div style={{ fontSize: 11.5, color: C.sub, fontWeight: 600 }}>Other</div>
+            <div className="ff-display" style={{ fontSize: 16, fontWeight: 700, color: C.ink }}>₹{otherExpThisMonth.toFixed(0)}</div>
           </div>
         </div>
 
         {!isReadOnly && (
           <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
-            <button onClick={() => onAdd('income')} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.greenSoft, color: C.green, border: 'none', borderRadius: 12, padding: '11px 0', fontWeight: 700, fontSize: 13 }}>
+            <button onClick={() => onAdd('income')} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.greenSoft, color: C.green, border: 'none', borderRadius: 12, padding: '11px 0', fontWeight: 700, fontSize: 14 }}>
               <Plus size={15} /> Add income
             </button>
-            <button onClick={() => onAdd('expense')} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.rustSoft, color: C.rust, border: 'none', borderRadius: 12, padding: '11px 0', fontWeight: 700, fontSize: 13 }}>
+            <button onClick={() => onAdd('expense')} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.rustSoft, color: C.rust, border: 'none', borderRadius: 12, padding: '11px 0', fontWeight: 700, fontSize: 14 }}>
               <Plus size={15} /> Add expense
             </button>
           </div>
@@ -3909,10 +4047,10 @@ function FinanceScreen({ financeEntries, feedTransactions, feedTypes, onAdd, onE
                   {e.type === 'income' ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
                 </div>
                 <div style={{ flex: 1, marginLeft: 10 }}>
-                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 13, color: C.ink }}>{e.category}{e.isFeed ? ' (from Feed tab)' : ''}</div>
-                  <div style={{ fontSize: 11.5, color: C.sub }}>{fmtDate(e.date)}{e.notes ? ` · ${e.notes}` : ''}</div>
+                  <div className="ff-display" style={{ fontWeight: 700, fontSize: 14, color: C.ink }}>{e.category}{e.isFeed ? ' (from Feed tab)' : ''}</div>
+                  <div style={{ fontSize: 13, color: C.sub }}>{fmtDate(e.date)}{e.notes ? ` · ${e.notes}` : ''}</div>
                 </div>
-                <div className="ff-display" style={{ fontWeight: 700, fontSize: 15, color: e.type === 'income' ? C.green : C.rust }}>
+                <div className="ff-display" style={{ fontWeight: 700, fontSize: 16, color: e.type === 'income' ? C.green : C.rust }}>
                   {e.type === 'income' ? '+' : '−'}₹{Number(e.amount).toFixed(0)}
                 </div>
                 {!e.isFeed && <ChevronRight size={16} color={C.grey} style={{ marginLeft: 4 }} />}
@@ -3932,10 +4070,10 @@ function FinanceScreen({ financeEntries, feedTransactions, feedTypes, onAdd, onE
           </div>
           {!isReadOnly && (
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => { onEdit(viewing.id); setViewing(null); }} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.greenSoft, color: C.green, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 13, fontWeight: 700 }}>
+              <button onClick={() => { onEdit(viewing.id); setViewing(null); }} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.brandSoft, color: C.brand, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 14, fontWeight: 700 }}>
                 <Pencil size={14} /> Edit
               </button>
-              <button onClick={() => { setConfirmDelId(viewing.id); setViewing(null); }} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.rustSoft, color: C.rust, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 13, fontWeight: 700 }}>
+              <button onClick={() => { setConfirmDelId(viewing.id); setViewing(null); }} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.rustSoft, color: C.rust, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 14, fontWeight: 700 }}>
                 <Trash2 size={14} /> Delete
               </button>
             </div>
@@ -3945,7 +4083,7 @@ function FinanceScreen({ financeEntries, feedTransactions, feedTypes, onAdd, onE
 
       {confirmDelId && (
         <Modal title="Delete this entry?" onClose={() => setConfirmDelId(null)}>
-          <div style={{ fontSize: 13, color: C.sub, marginBottom: 14 }}>This can't be undone.</div>
+          <div style={{ fontSize: 14, color: C.sub, marginBottom: 14 }}>This can't be undone.</div>
           <PrimaryButton danger onClick={() => { onDelete(confirmDelId); setConfirmDelId(null); }}>Delete permanently</PrimaryButton>
         </Modal>
       )}
