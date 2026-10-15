@@ -12,14 +12,18 @@ import { supabase, configMissing } from './supabaseClient.js';
 const RoleContext = React.createContext({ role: 'owner', isReadOnly: false });
 
 const C = {
-  bg: '#F5F5F7',
+  bg: '#F2F7FC',
   card: '#FFFFFF',
   ink: '#1C1C1C',
   sub: '#6B6B6B',
   line: '#E6E6EA',
-  brand: '#E23744',
-  brandDark: '#C81E2D',
-  brandSoft: '#FDECEE',
+  brand: '#4B8FEA',
+  brandDark: '#3573D6',
+  brandSoft: '#EAF2FF',
+  brandRgb: '75,143,234',
+  heroGradient: 'linear-gradient(135deg, #5AA2F2 0%, #74BDF4 52%, #9BE3E8 100%)',
+  skyTop: '#CFE8FF',
+  skyBottom: '#F6FBFF',
   green: '#1E9E50',
   greenDark: '#157A3B',
   greenSoft: '#E3F5EA',
@@ -27,8 +31,8 @@ const C = {
   brownSoft: '#F7EBDC',
   rust: '#D93636',
   rustSoft: '#FDE8E8',
-  milk: '#2F7DF6',
-  milkSoft: '#E6F0FE',
+  milk: '#12A5A8',
+  milkSoft: '#DFF5F5',
   amber: '#B76E00',
   amberSoft: '#FFF1D6',
   grey: '#8A8A93',
@@ -469,7 +473,7 @@ function HeaderIconButton({ icon, onClick, title }) {
 
 function ScreenHeader({ title, subtitle, onBack, right, children }) {
   return (
-    <div style={{ background: `linear-gradient(135deg, ${C.brand} 0%, ${C.brandDark} 100%)`, color: '#fff', padding: '18px 18px 20px', paddingTop: 'max(18px, calc(env(safe-area-inset-top) + 12px))', borderRadius: '0 0 28px 28px', boxShadow: '0 10px 24px rgba(226,55,68,0.22)' }}>
+    <div style={{ background: `linear-gradient(135deg, ${C.brand} 0%, ${C.brandDark} 100%)`, color: '#fff', padding: '18px 18px 20px', paddingTop: 'max(18px, calc(env(safe-area-inset-top) + 12px))', borderRadius: '0 0 28px 28px', boxShadow: `0 10px 24px rgba(${C.brandRgb},0.22)` }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         {onBack && (
           <button onClick={onBack} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: 12, padding: 8, display: 'flex', minWidth: 38, minHeight: 38, alignItems: 'center', justifyContent: 'center' }}>
@@ -497,7 +501,7 @@ function FAB({ onClick, label }) {
       style={{
         position: 'absolute', right: 16, bottom: 90, background: C.brand, color: '#fff',
         border: 'none', borderRadius: 16, padding: '14px 20px', display: 'flex', alignItems: 'center', gap: 8,
-        fontWeight: 700, fontSize: 16, boxShadow: '0 10px 22px rgba(226,55,68,0.4)', zIndex: 20,
+        fontWeight: 700, fontSize: 16, boxShadow: `0 10px 22px rgba(${C.brandRgb},0.4)`, zIndex: 20,
       }}
     >
       <Plus size={19} strokeWidth={2.6} /> {label}
@@ -560,7 +564,7 @@ function PrimaryButton({ children, onClick, disabled, danger }) {
       style={{
         width: '100%', background: danger ? '#B42318' : C.brand, color: '#fff', border: 'none', borderRadius: 14,
         padding: '15px 0', fontWeight: 700, fontSize: 17, opacity: disabled ? 0.45 : 1, marginTop: 6,
-        boxShadow: disabled ? 'none' : (danger ? '0 8px 16px rgba(180,35,24,0.28)' : '0 8px 16px rgba(226,55,68,0.3)'),
+        boxShadow: disabled ? 'none' : (danger ? '0 8px 16px rgba(180,35,24,0.28)' : `0 8px 16px rgba(${C.brandRgb},0.3)`),
       }}
     >
       {children}
@@ -645,10 +649,10 @@ function CowThumb({ cow, size = 78 }) {
 function MilkBottle({ size = 46 }) {
   return (
     <svg width={size} height={Math.round(size * 1.5)} viewBox="0 0 60 90" aria-hidden="true" style={{ display: 'block' }}>
-      <rect x="21" y="3" width="18" height="10" rx="3" fill="#8F1420" />
+      <rect x="21" y="3" width="18" height="10" rx="3" fill={C.brandDark} />
       <path d="M22 13 H38 V22 C38 26 48 30 48 40 V80 C48 85 45 88 40 88 H20 C15 88 12 85 12 80 V40 C12 30 22 26 22 22 Z" fill="#fff" />
-      <rect x="12" y="46" width="36" height="24" fill="#FDECEE" />
-      <text x="30" y="63" textAnchor="middle" fontSize="12" fontWeight="800" fill="#E23744" fontFamily="Plus Jakarta Sans, Inter, sans-serif">MILK</text>
+      <rect x="12" y="46" width="36" height="24" fill={C.brandSoft} />
+      <text x="30" y="63" textAnchor="middle" fontSize="12" fontWeight="800" fill={C.brand} fontFamily="Plus Jakarta Sans, Inter, sans-serif">MILK</text>
     </svg>
   );
 }
@@ -658,12 +662,12 @@ function PastureScene({ height = 150 }) {
     <svg viewBox="0 0 360 170" preserveAspectRatio="xMidYMid slice" width="100%" height={height} aria-hidden="true" style={{ display: 'block' }}>
       <defs>
         <linearGradient id="pgSky" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#FFC9BC" />
-          <stop offset="1" stopColor="#FFF4E3" />
+          <stop offset="0" stopColor={C.skyTop} />
+          <stop offset="1" stopColor={C.skyBottom} />
         </linearGradient>
       </defs>
       <rect width="360" height="170" fill="url(#pgSky)" />
-      <circle cx="292" cy="46" r="34" fill="#FFC857" opacity="0.28" />
+      <circle cx="292" cy="46" r="34" fill="#FFFFFF" opacity="0.55" />
       <circle cx="292" cy="46" r="21" fill="#FFC857" />
       <ellipse cx="72" cy="34" rx="26" ry="8" fill="#fff" opacity="0.9" />
       <ellipse cx="94" cy="28" rx="18" ry="7" fill="#fff" opacity="0.9" />
@@ -1969,7 +1973,7 @@ function HomeScreen({ cows, milkToday, heatAlerts, medDue, insemAlerts, insuranc
           </div>
         )}
 
-        <div style={{ position: 'relative', overflow: 'hidden', borderRadius: 24, background: 'linear-gradient(135deg, #E23744 0%, #F0584F 55%, #FF8A5B 100%)', color: '#fff', padding: '20px 18px', minHeight: 158, boxShadow: '0 14px 28px rgba(226,55,68,0.28)', marginBottom: 22 }}>
+        <div style={{ position: 'relative', overflow: 'hidden', borderRadius: 24, background: C.heroGradient, color: '#fff', padding: '20px 18px', minHeight: 158, boxShadow: `0 14px 28px rgba(${C.brandRgb},0.28)`, marginBottom: 22 }}>
           <div style={{ position: 'absolute', right: -30, top: -40, width: 150, height: 150, borderRadius: 75, background: 'rgba(255,255,255,0.2)' }} />
           <div style={{ position: 'absolute', right: 60, bottom: -60, width: 120, height: 120, borderRadius: 60, background: 'rgba(255,255,255,0.1)' }} />
           <div style={{ position: 'relative', zIndex: 1, maxWidth: '58%' }}>
@@ -2147,7 +2151,7 @@ function CowsScreen({ cows, heatStatusFor, onOpenCow, onAddCow, onAddCalf, onExp
           <button
             onClick={onAddCow}
             className="ff-body"
-            style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.brand, color: '#fff', border: 'none', borderRadius: 14, padding: '13px 0', fontWeight: 700, fontSize: 15.5, boxShadow: '0 8px 16px rgba(226,55,68,0.28)' }}
+            style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.brand, color: '#fff', border: 'none', borderRadius: 14, padding: '13px 0', fontWeight: 700, fontSize: 15.5, boxShadow: `0 8px 16px rgba(${C.brandRgb},0.28)` }}
           >
             <Plus size={15} /> Add cow
           </button>
