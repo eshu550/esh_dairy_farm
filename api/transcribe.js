@@ -6,8 +6,11 @@
 // nothing new to set up in Vercel. Works in all browsers (the app records with
 // MediaRecorder, so it doesn't depend on the browser's built-in speech engine).
 //
-// Whisper understands 100+ languages (English, Hindi, Kannada, Tamil, Telugu,
-// Marathi...) and auto-detects which one is being spoken.
+// The language is fixed to English. Letting Whisper auto-detect made it
+// mis-hear short or accented English as other languages (e.g. Icelandic) and
+// return gibberish. To support another language later, change LANGUAGE below
+// (e.g. 'hi' for Hindi, 'kn' for Kannada).
+const LANGUAGE = 'en';
 
 const GROQ_STT_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
 
@@ -72,6 +75,7 @@ export default async function handler(req, res) {
     form.append('model', model);
     form.append('response_format', 'json');
     form.append('temperature', '0');
+    form.append('language', LANGUAGE);
     form.append('prompt', prompt);
     return fetch(GROQ_STT_URL, { method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form });
   };
