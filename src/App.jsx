@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useContext } from 'react';
 import {
   Home, Milk, HeartPulse, Stethoscope, Plus, ArrowLeft, X,
   Calendar, Search, Check, ChevronRight, ChevronLeft, Trash2, Pencil, Droplet, Syringe, Printer, Download, Wheat, Baby, PackageMinus, PackagePlus, Upload, LogOut, Mail, Lock, Users, UserPlus, Eye, KeyRound, UserCircle, Wallet, TrendingUp, TrendingDown,
-  Sparkles, Send
+  Sparkles, Send, Mic
 } from 'lucide-react';
 import ReactDOM from 'react-dom';
 import { supabase, configMissing } from './supabaseClient.js';
@@ -47,6 +47,8 @@ const FONTS = (
     .app-shell { height: 100vh; height: 100dvh; }
     .ff-display { font-family: 'Plus Jakarta Sans', 'Inter', sans-serif; font-weight: 800 !important; letter-spacing: -0.01em; }
     .ff-body { font-family: 'Inter', sans-serif; }
+    .rec-dot { width: 12px; height: 12px; border-radius: 50%; background: #E5484D; flex-shrink: 0; animation: recPulse 1.1s ease-in-out infinite; }
+    @keyframes recPulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(1.3); } }
     * { -webkit-tap-highlight-color: transparent; }
     button { font-family: 'Inter', sans-serif; cursor: pointer; }
     button:active { transform: scale(0.98); }
@@ -1900,30 +1902,75 @@ function AskAIFab({ onClick }) {
   );
 }
 
+const MAX_VOICE_SECONDS = 60;
+const fmtTimer = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+const blobToBase64 = (blob) => new Promise((resolve, reject) => {
+  const fr = new FileReader();
+  fr.onloadend = () => resolve(String(fr.result).split(',')[1] || '');
+  fr.onerror = reject;
+  fr.readAsDataURL(blob);
+});
+const pickRecorderMime = () => {
+  const options = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
+  for (const o of options) {
+    if (window.MediaRecorder && window.MediaRecorder.isTypeSupported && window.MediaRecorder.isTypeSupported(o)) return o;
+  }
+  return '';
+};
+
 function AskAIPanel({ farmData, farmName, focusCow, onClose }) {
-  const [messages, setMessages] = useState([]); // { role: 'user'|'assistant'|'error', text }
+  const [messages, setMessages] = useState([]); // { role: 'user'|'assistant'|'error', text, voice? }
   const [input, setInput] = useState(focusCow ? `About ${focusCow.name} (#${focusCow.tagNumber}): ` : '');
   const [busy, setBusy] = useState(false);
+  const [rec, setRec] = useState('idle'); // 'idle' | 'recording' | 'transcribing'
+  const [secs, setSecs] = useState(0);
   const scrollRef = useRef(null);
+  const recorderRef = useRef(null);
+  const streamRef = useRef(null);
+  const chunksRef = useRef([]);
+  const timerRef = useRef(null);
+  const startedAtRef = useRef(0);
+  const cancelledRef = useRef(false);
+  // Always read the latest props/state from async callbacks (recorder events fire later)
+  const latest = useRef({});
+  latest.current = { farmData, farmName, focusCow, messages, busy };
+
+  const voiceSupported = typeof window !== 'undefined' && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) && typeof window.MediaRecorder !== 'undefined';
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [messages, busy]);
+  }, [messages, busy, rec]);
 
-  const send = async () => {
-    const question = input.trim();
-    if (!question || busy) return;
-    const nextMessages = [...messages, { role: 'user', text: question }];
+  const releaseMic = () => {
+    clearInterval(timerRef.current);
+    if (streamRef.current) { streamRef.current.getTracks().forEach((t) => t.stop()); streamRef.current = null; }
+  };
+
+  // Turn the microphone off if the panel is closed while recording
+  useEffect(() => () => {
+    cancelledRef.current = true;
+    try { if (recorderRef.current && recorderRef.current.state !== 'inactive') recorderRef.current.stop(); } catch (e) { /* ignore */ }
+    releaseMic();
+  }, []);
+
+  const addError = (text) => setMessages((m) => [...m, { role: 'error', text }]);
+
+  const send = async (override) => {
+    const fromVoice = typeof override === 'string';
+    const question = (fromVoice ? override : input).trim();
+    const { farmData: fd, farmName: fn, focusCow: fc, messages: current, busy: isBusy } = latest.current;
+    if (!question || isBusy) return;
+    const nextMessages = [...current, { role: 'user', text: question, voice: fromVoice }];
     setMessages(nextMessages);
-    setInput('');
+    if (!fromVoice) setInput('');
     setBusy(true);
     try {
-      const context = buildFarmContext({ ...farmData, farmName });
+      const context = buildFarmContext({ ...fd, farmName: fn });
       const history = nextMessages.slice(0, -1).slice(-10).map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.text }));
       const res = await fetch('/api/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, context, history, focusCow: focusCow ? `${focusCow.name} (#${focusCow.tagNumber})` : null }),
+        body: JSON.stringify({ question, context, history, focusCow: fc ? `${fc.name} (#${fc.tagNumber})` : null }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -1937,6 +1984,83 @@ function AskAIPanel({ farmData, farmName, focusCow, onClose }) {
       setBusy(false);
     }
   };
+
+  const handleRecordingStopped = async (mime) => {
+    const durationMs = Date.now() - startedAtRef.current;
+    releaseMic();
+    if (cancelledRef.current) { setRec('idle'); return; }
+    if (durationMs < 800 || chunksRef.current.length === 0) {
+      setRec('idle');
+      addError("I didn't catch that — tap the mic, speak for a moment, then tap send.");
+      return;
+    }
+    setRec('transcribing');
+    try {
+      const blob = new Blob(chunksRef.current, { type: mime });
+      const audio = await blobToBase64(blob);
+      const names = ((latest.current.farmData && latest.current.farmData.cows) || []).slice(0, 30).map((c) => c.name).filter(Boolean);
+      const res = await fetch('/api/transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audio, mime, names }),
+      });
+      const data = await res.json().catch(() => ({}));
+      setRec('idle');
+      if (!res.ok || !data.text) {
+        addError(data.error || "Couldn't understand the recording. Please try again.");
+        return;
+      }
+      await send(data.text);
+    } catch (e) {
+      setRec('idle');
+      addError("Couldn't send the recording — check your connection and try again.");
+    }
+  };
+
+  const stopRecording = (cancel) => {
+    cancelledRef.current = !!cancel;
+    clearInterval(timerRef.current);
+    const r = recorderRef.current;
+    if (r && r.state !== 'inactive') r.stop();
+    else { releaseMic(); setRec('idle'); }
+  };
+
+  const startRecording = async () => {
+    if (rec !== 'idle' || latest.current.busy) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      streamRef.current = stream;
+      const mimeType = pickRecorderMime();
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      chunksRef.current = [];
+      cancelledRef.current = false;
+      recorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunksRef.current.push(e.data); };
+      recorder.onstop = () => handleRecordingStopped(recorder.mimeType || mimeType || 'audio/webm');
+      recorderRef.current = recorder;
+      recorder.start();
+      startedAtRef.current = Date.now();
+      setSecs(0);
+      setRec('recording');
+      timerRef.current = setInterval(() => {
+        const s = Math.floor((Date.now() - startedAtRef.current) / 1000);
+        setSecs(s);
+        if (s >= MAX_VOICE_SECONDS) stopRecording(false);
+      }, 250);
+    } catch (err) {
+      releaseMic();
+      const name = err && err.name;
+      addError(
+        name === 'NotAllowedError' || name === 'SecurityError'
+          ? 'Microphone access is blocked. Allow the microphone for this site in your browser settings, then try again.'
+          : name === 'NotFoundError'
+            ? 'No microphone was found on this device.'
+            : "Couldn't start the microphone. Please try again."
+      );
+    }
+  };
+
+  const roundBtn = (bg, extra = {}) => ({ flexShrink: 0, width: 44, height: 44, borderRadius: 22, border: 'none', background: bg, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', ...extra });
+  const hasText = !!input.trim();
 
   return ReactDOM.createPortal(
     <div style={{ position: 'fixed', inset: 0, background: C.bg, zIndex: 1100, display: 'flex', justifyContent: 'center' }}>
@@ -1956,9 +2080,10 @@ function AskAIPanel({ farmData, farmName, focusCow, onClose }) {
 
         <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: 16, WebkitOverflowScrolling: 'touch' }}>
           {messages.length === 0 && (
-            <div style={{ textAlign: 'center', color: C.sub, fontSize: 13.5, marginTop: 30, padding: '0 14px' }}>
+            <div style={{ textAlign: 'center', color: C.sub, fontSize: 13.5, marginTop: 30, padding: '0 14px', lineHeight: 1.5 }}>
               Ask anything about your herd — e.g. "which cows are due for heat this week",
               "how much milk did we get yesterday", "total expenses last month", or "is {focusCow ? focusCow.name : 'Ganga'} pregnant".
+              {voiceSupported && <div style={{ marginTop: 10, color: C.brand, fontWeight: 600 }}>Tap the microphone to ask by speaking.</div>}
             </div>
           )}
           {messages.map((m, i) => (
@@ -1972,6 +2097,7 @@ function AskAIPanel({ farmData, farmName, focusCow, onClose }) {
                   border: m.role === 'assistant' ? `1px solid ${C.line}` : 'none',
                 }}
               >
+                {m.voice && <Mic size={13} style={{ marginRight: 6, verticalAlign: '-2px', opacity: 0.85 }} />}
                 {m.text}
               </div>
             </div>
@@ -1983,23 +2109,47 @@ function AskAIPanel({ farmData, farmName, focusCow, onClose }) {
           )}
         </div>
 
-        <div style={{ flexShrink: 0, borderTop: `1px solid ${C.line}`, background: '#fff', padding: 10, paddingBottom: 'max(10px, calc(env(safe-area-inset-bottom) + 6px))', display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-            placeholder="Ask about your animals, health, milk, or finances…"
-            rows={1}
-            className="ff-body"
-            style={{ flex: 1, resize: 'none', maxHeight: 90, border: `1.5px solid ${C.line}`, borderRadius: 12, padding: '10px 12px', fontSize: 14.5, outline: 'none', fontFamily: 'inherit' }}
-          />
-          <button
-            onClick={send}
-            disabled={busy || !input.trim()}
-            style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 20, border: 'none', background: C.brand, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: busy || !input.trim() ? 0.5 : 1 }}
-          >
-            <Send size={16} />
-          </button>
+        <div style={{ flexShrink: 0, borderTop: `1px solid ${C.line}`, background: '#fff', padding: 10, paddingBottom: 'max(10px, calc(env(safe-area-inset-bottom) + 6px))', display: 'flex', gap: 8, alignItems: 'center' }}>
+          {rec === 'idle' && (
+            <>
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+                placeholder={voiceSupported ? 'Type, or tap the mic to speak…' : 'Ask about your animals, health, milk, or finances…'}
+                rows={1}
+                className="ff-body"
+                style={{ flex: 1, resize: 'none', maxHeight: 90, border: `1.5px solid ${C.line}`, borderRadius: 14, padding: '11px 13px', fontSize: 16, outline: 'none', fontFamily: 'inherit' }}
+              />
+              {hasText || !voiceSupported ? (
+                <button onClick={() => send()} disabled={busy || !hasText} aria-label="Send" style={roundBtn(C.brand, { opacity: busy || !hasText ? 0.5 : 1 })}>
+                  <Send size={18} />
+                </button>
+              ) : (
+                <button onClick={startRecording} disabled={busy} aria-label="Ask by voice" style={roundBtn(C.brand, { opacity: busy ? 0.5 : 1, boxShadow: `0 6px 14px rgba(${C.brandRgb},0.35)` })}>
+                  <Mic size={20} />
+                </button>
+              )}
+            </>
+          )}
+          {rec === 'recording' && (
+            <>
+              <button onClick={() => stopRecording(true)} aria-label="Cancel recording" style={roundBtn(C.greySoft)}>
+                <X size={20} color={C.ink} />
+              </button>
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10, background: C.brandSoft, borderRadius: 22, padding: '11px 16px', minWidth: 0 }}>
+                <span className="rec-dot" />
+                <span className="ff-display" style={{ fontSize: 16, color: C.ink }}>{fmtTimer(secs)}</span>
+                <span className="ff-body" style={{ fontSize: 13.5, color: C.sub, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Listening…</span>
+              </div>
+              <button onClick={() => stopRecording(false)} aria-label="Send voice question" style={roundBtn(C.brand, { boxShadow: `0 6px 14px rgba(${C.brandRgb},0.35)` })}>
+                <Send size={19} />
+              </button>
+            </>
+          )}
+          {rec === 'transcribing' && (
+            <div className="ff-body" style={{ flex: 1, textAlign: 'center', fontSize: 14.5, color: C.sub, padding: '13px 0' }}>Transcribing your voice…</div>
+          )}
         </div>
       </div>
     </div>,
