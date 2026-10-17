@@ -102,56 +102,131 @@ const shiftMonth = (m, delta) => {
   const d = new Date(y, mo - 1 + delta, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 };
+// Builds a COMPACT plain-text snapshot of the farm for the Ask AI feature.
+// Groq's free plan allows only ~8K tokens per minute, so this keeps each question small:
+// all animals, daily milk for the last 7 days + monthly totals, recent heat/health, stock, and finance by month.
+const ASK_AI_MAX_CHARS = 14000;
+
 function buildFarmContext({ cows, milk, heat, medical, financeEntries, feedTransactions, feedTypes, medicineTypes, medicineTransactions, farmName }) {
-  const cowLabel = (id) => {
-    const c = cows.find((x) => x.id === id);
-    return c ? `${c.name} (#${c.tagNumber})` : 'Unknown cow';
-  };
-  const feedName = (id) => (feedTypes.find((f) => f.id === id) || {}).name || 'Unknown feed';
-  const medName = (id) => (medicineTypes.find((m) => m.id === id) || {}).name || 'Unknown medicine';
-  const since90 = addDays(todayStr(), -90);
+  const today = todayStr();
+  const r1 = (n) => Math.round(Number(n || 0) * 10) / 10;
+  const r0 = (n) => Math.round(Number(n || 0));
+  const clip = (t, n) => { const x = String(t || '').replace(/\s+/g, ' ').trim(); return x.length > n ? x.slice(0, n - 1) + '…' : x; };
 
-  const milkMonthlyByCow = {};
-  milk.forEach((m) => {
-    const label = cowLabel(m.cowId);
-    const mo = m.date.slice(0, 7);
-    milkMonthlyByCow[label] = milkMonthlyByCow[label] || {};
-    milkMonthlyByCow[label][mo] = Math.round(((milkMonthlyByCow[label][mo] || 0) + Number(m.liters || 0)) * 100) / 100;
+  // Name labels: use the plain name, add the tag only if two animals share a name
+  const nameCount = {};
+  cows.forEach((c) => { nameCount[c.name] = (nameCount[c.name] || 0) + 1; });
+  const byId = Object.fromEntries(cows.map((c) => [c.id, c]));
+  const label = (id) => { const c = byId[id]; if (!c) return 'Unknown'; return nameCount[c.name] > 1 ? `${c.name}#${c.tagNumber}` : c.name; };
+  const STATUS = { active: 'milking', dry: 'dry', calf: 'calf', heifer: 'heifer', sold: 'sold' };
+
+  const counts = {};
+  cows.forEach((c) => { const k = STATUS[c.status] || c.status; counts[k] = (counts[k] || 0) + 1; });
+  const countStr = Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(', ');
+
+  const sections = [];
+  sections.push(`FARM: ${farmName || 'the farm'}. TODAY: ${today}. ANIMALS: ${cows.length} (${countStr || 'none'}).`);
+  sections.push('DATA WINDOWS: all animals; milk per day for last 7 days + monthly totals; heat last 3 per animal; health last 180 days + open follow-ups; finance monthly totals for last 6 months + last 12 entries.');
+
+  // ---- Animals ----
+  sections.push('ANIMALS (name #tag | breed | status | details):\n' + cows.slice(0, 80).map((c) => {
+    const bits = [`${c.name} #${c.tagNumber}`, c.breed, STATUS[c.status] || c.status];
+    if (c.gender) bits.push(c.gender);
+    if (c.dob) bits.push(`born ${c.dob}`);
+    if (c.motherCowId && byId[c.motherCowId]) bits.push(`mother ${label(c.motherCowId)}`);
+    if (c.calvingDate) bits.push(`last calved ${c.calvingDate}`);
+    if (c.cycleLength) bits.push(`heat cycle ${c.cycleLength}d`);
+    if (c.inseminatedOn) bits.push(`inseminated ${c.inseminatedOn}` + (c.pregnancyConfirmed ? ` PREGNANT, due ${addMonths(c.inseminatedOn, 9)}` : ''));
+    if (c.insured) bits.push('insured' + (c.insuranceExpiryDate ? ` until ${c.insuranceExpiryDate}` : ''));
+    if (c.mastitisAntibiotic) bits.push(`mastitis antibiotic: ${clip(c.mastitisAntibiotic, 30)}`);
+    return bits.join(' | ');
+  }).join('\n'));
+
+  // ---- Milk: last 7 days per cow, monthly totals ----
+  const since7 = addDays(today, -6);
+  const days = {};
+  milk.filter((m) => m.date >= since7 && m.date <= today).forEach((m) => {
+    const d = (days[m.date] = days[m.date] || { am: 0, pm: 0, cows: {} });
+    const l = Number(m.liters || 0);
+    if (m.session === 'AM') d.am += l; else d.pm += l;
+    d.cows[label(m.cowId)] = (d.cows[label(m.cowId)] || 0) + l;
   });
+  const dayLines = Object.keys(days).sort().reverse().map((date) => {
+    const d = days[date];
+    return `${date}: AM ${r1(d.am)} PM ${r1(d.pm)} total ${r1(d.am + d.pm)} L | ` + Object.entries(d.cows).map(([n, l]) => `${n} ${r1(l)}`).join(', ');
+  });
+  sections.push('MILK LAST 7 DAYS (litres; per-cow = AM+PM):\n' + (dayLines.length ? dayLines.join('\n') : 'no milk records in the last 7 days'));
 
-  return {
-    farmName: farmName || 'the farm',
-    today: todayStr(),
-    animals: cows.map((c) => ({
-      name: c.name, tag: c.tagNumber, breed: c.breed, status: c.status,
-      gender: c.gender || undefined, dob: c.dob || undefined,
-      mother: c.motherCowId ? cowLabel(c.motherCowId) : undefined,
-      birthWeightKg: c.birthWeight !== '' ? c.birthWeight : undefined,
-      cycleLengthDays: c.cycleLength || undefined,
-      lastCalvingDate: c.calvingDate || undefined,
-      firstHeatAfterCalving: c.firstHeatDate || undefined,
-      lastInseminatedOn: c.inseminatedOn || undefined,
-      pregnant: (c.pregnancyConfirmed && c.inseminatedOn) || undefined,
-      expectedCalvingDate: (c.pregnancyConfirmed && c.inseminatedOn) ? addMonths(c.inseminatedOn, 9) : undefined,
-      mastitisAntibiotic: c.mastitisAntibiotic || undefined,
-      insured: c.insured || undefined,
-      insuranceStartDate: c.insured ? c.insuranceStartDate || undefined : undefined,
-      insuranceExpiryDate: c.insured ? c.insuranceExpiryDate || undefined : undefined,
-    })),
-    milk_monthly_totals_liters_by_cow: milkMonthlyByCow,
-    milk_entries_last_90_days: milk.filter((m) => m.date >= since90).map((m) => ({ cow: cowLabel(m.cowId), date: m.date, session: m.session, liters: m.liters })),
-    heat_records: heat.map((h) => ({ cow: cowLabel(h.cowId), date: h.date, bred: !!h.bred, notes: h.notes || undefined })),
-    health_records: medical.map((m) => ({
-      cow: cowLabel(m.cowId), date: m.date, type: m.type, medicine: m.medicine || undefined,
-      details: m.description || undefined, vet: m.vet || undefined,
-      nextDueDate: m.nextDueDate || undefined, completed: !!m.completed,
-    })),
-    feed_current_stock_bags: feedTypes.map((f) => ({ feed: f.name, stockBags: feedStock(f.id, feedTransactions) })),
-    feed_transactions: feedTransactions.map((t) => ({ feed: feedName(t.feedTypeId), date: t.date, kind: t.kind, bags: t.bags, cost: t.cost || undefined, notes: t.notes || undefined })),
-    medicine_current_stock: medicineTypes.map((m) => ({ medicine: m.name, stock: medicineStock(m.id, medicineTransactions) })),
-    medicine_transactions: medicineTransactions.map((t) => ({ medicine: medName(t.medicineTypeId), date: t.date, kind: t.kind, quantity: t.quantity, cost: t.cost || undefined, notes: t.notes || undefined })),
-    finance_entries: financeEntries.map((e) => ({ date: e.date, type: e.type, category: e.category, amount: e.amount, notes: e.notes || undefined })),
+  const months = {};
+  milk.forEach((m) => {
+    const mo = m.date.slice(0, 7);
+    const x = (months[mo] = months[mo] || { total: 0, cows: {} });
+    const l = Number(m.liters || 0);
+    x.total += l;
+    x.cows[label(m.cowId)] = (x.cows[label(m.cowId)] || 0) + l;
+  });
+  const moKeys = Object.keys(months).sort().reverse().slice(0, 6);
+  sections.push('MILK MONTHLY TOTALS (litres):\n' + (moKeys.length ? moKeys.map((mo, i) => (
+    `${mo}: total ${r1(months[mo].total)}` + (i < 3 ? ' | ' + Object.entries(months[mo].cows).map(([n, l]) => `${n} ${r1(l)}`).join(', ') : '')
+  )).join('\n') : 'none'));
+
+  // ---- Heat: last 3 per cow ----
+  const heatByCow = {};
+  [...heat].sort((a, b) => b.date.localeCompare(a.date)).forEach((h) => {
+    (heatByCow[h.cowId] = heatByCow[h.cowId] || []).push(h);
+  });
+  const heatLines = Object.entries(heatByCow).slice(0, 60).map(([id, list]) => (
+    `${label(id)}: ` + list.slice(0, 3).map((h) => `${h.date}${h.bred ? ' (bred)' : ''}${h.notes ? ' ' + clip(h.notes, 30) : ''}`).join('; ')
+  ));
+  sections.push('HEAT RECORDS (newest first):\n' + (heatLines.length ? heatLines.join('\n') : 'none'));
+
+  // ---- Health: last 180 days + any open follow-up ----
+  const since180 = addDays(today, -180);
+  const healthRows = medical
+    .filter((m) => m.date >= since180 || (m.nextDueDate && !m.completed))
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, 70);
+  sections.push('HEALTH RECORDS:\n' + (healthRows.length ? healthRows.map((m) => (
+    `${m.date} ${label(m.cowId)}: ${m.type}` + (m.medicine ? ` (${clip(m.medicine, 25)})` : '') + (m.description ? ` - ${clip(m.description, 50)}` : '') +
+    (m.vet ? `; vet ${clip(m.vet, 20)}` : '') + (m.nextDueDate ? `; follow-up ${m.nextDueDate} ${m.completed ? '[done]' : '[open]'}` : '')
+  )).join('\n') : 'none'));
+
+  // ---- Stock ----
+  const feedName = (id) => (feedTypes.find((f) => f.id === id) || {}).name || 'feed';
+  sections.push('FEED STOCK (bags, cost per bag): ' + (feedTypes.length ? feedTypes.map((f) => `${f.name} ${r1(feedStock(f.id, feedTransactions))} bags @₹${r0(f.costPerBag)}`).join('; ') : 'none'));
+  const sinceTxn = addDays(today, -45);
+  const feedTx = feedTransactions.filter((t) => t.date >= sinceTxn).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 20);
+  if (feedTx.length) sections.push('RECENT FEED MOVEMENTS (45d):\n' + feedTx.map((t) => `${t.date} ${t.kind} ${feedName(t.feedTypeId)} ${t.bags} bags`).join('\n'));
+  sections.push('MEDICINE STOCK: ' + (medicineTypes.length ? medicineTypes.map((m) => `${m.name} ${r1(medicineStock(m.id, medicineTransactions))} ${m.unit}`).join('; ') : 'none'));
+
+  // ---- Finance (mirrors the Finance screen: feed cost = bags USED x cost per bag) ----
+  const fin = {};
+  const add = (date, type, cat, amt) => {
+    const mo = String(date || '').slice(0, 7);
+    if (!mo) return;
+    const x = (fin[mo] = fin[mo] || { income: 0, expense: 0, cats: {} });
+    const a = Number(amt || 0);
+    if (type === 'income') x.income += a; else x.expense += a;
+    const key = `${type === 'income' ? 'income' : 'expense'}:${cat || 'Other'}`;
+    x.cats[key] = (x.cats[key] || 0) + a;
   };
+  financeEntries.forEach((e) => add(e.date, e.type, e.category, e.amount));
+  feedTransactions.filter((t) => t.kind === 'usage').forEach((t) => {
+    const ft = feedTypes.find((f) => f.id === t.feedTypeId);
+    add(t.date, 'expense', 'Feed', ft ? Number(t.bags) * Number(ft.costPerBag || 0) : 0);
+  });
+  const finKeys = Object.keys(fin).sort().reverse().slice(0, 6);
+  sections.push('FINANCE BY MONTH (₹; expenses include feed used):\n' + (finKeys.length ? finKeys.map((mo) => {
+    const x = fin[mo];
+    const cats = Object.entries(x.cats).map(([k, v]) => `${k.replace(':', ' ')} ${r0(v)}`).join(', ');
+    return `${mo}: income ${r0(x.income)}, expense ${r0(x.expense)}, net ${r0(x.income - x.expense)} | ${cats}`;
+  }).join('\n') : 'none'));
+  const recentFin = [...financeEntries].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 12);
+  if (recentFin.length) sections.push('LAST FINANCE ENTRIES:\n' + recentFin.map((e) => `${e.date} ${e.type} ${e.category || ''} ₹${r0(e.amount)}${e.notes ? ' - ' + clip(e.notes, 40) : ''}`).join('\n'));
+
+  let text = sections.join('\n\n');
+  if (text.length > ASK_AI_MAX_CHARS) text = text.slice(0, ASK_AI_MAX_CHARS) + '\n[data truncated to fit the free plan — older details omitted]';
+  return text;
 }
 
 function MonthSwitcher({ month, onChange }) {
