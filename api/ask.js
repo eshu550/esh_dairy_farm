@@ -61,6 +61,7 @@ Rules:
 - Dates are YYYY-MM-DD. "TODAY" in the data header is the current date.
 - The data only covers the windows listed under DATA WINDOWS. If the question needs older or missing data, say so plainly instead of guessing.
 - Currency is Indian rupees (₹); milk is in litres.
+- Reply in the same language the question is written in (for example English, Hindi or Kannada).
 
 FARM DATA:
 ${contextText}`;
