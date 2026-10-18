@@ -6,16 +6,29 @@
 // nothing new to set up in Vercel. Works in all browsers (the app records with
 // MediaRecorder, so it doesn't depend on the browser's built-in speech engine).
 //
-// The language is fixed to English. Letting Whisper auto-detect made it
-// mis-hear short or accented English as other languages (e.g. Icelandic) and
-// return gibberish. To support another language later, change LANGUAGE below
-// (e.g. 'hi' for Hindi, 'kn' for Kannada).
-const LANGUAGE = 'en';
+// Two languages are supported: English ('en') and Kannada ('kn'). The app tells us
+// which one the user picked, and we pass it to Whisper explicitly. (Letting Whisper
+// auto-detect made it mis-hear short or accented speech as other languages.)
 
 const GROQ_STT_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
 
-// Turbo is the fastest; fall back to the full model if turbo is busy (separate limits).
-const MODELS = ['whisper-large-v3-turbo', 'whisper-large-v3'];
+// Per-language settings. Turbo is fastest (best for English); the full model is
+// more accurate for Kannada. Each model has its own free limits, so the second
+// one is also the fallback if the first is busy.
+const LANGUAGES = {
+  en: {
+    models: ['whisper-large-v3-turbo', 'whisper-large-v3'],
+    intro: 'Questions about a dairy farm: milk, heat, insemination, vaccination, feed, expenses.',
+    namesLabel: 'Cow names:',
+    silence: ['thank you', 'thank you.', 'thanks.', 'thanks for watching', 'thanks for watching!', 'you', 'bye', 'bye.', '.'],
+  },
+  kn: {
+    models: ['whisper-large-v3', 'whisper-large-v3-turbo'],
+    intro: 'ಹೈನುಗಾರಿಕೆ ಫಾರ್ಮ್ ಬಗ್ಗೆ ಪ್ರಶ್ನೆಗಳು: ಹಾಲು, ಹಸು, ಲಸಿಕೆ, ಮೇವು, ಖರ್ಚು.',
+    namesLabel: 'ಹಸುಗಳ ಹೆಸರುಗಳು:',
+    silence: ['ಧನ್ಯವಾದಗಳು', 'ಧನ್ಯವಾದಗಳು.', 'ಧನ್ಯವಾದ', 'ಧನ್ಯವಾದ.', '.'],
+  },
+};
 
 // Vercel rejects request bodies over ~4.5 MB; a 60-second voice clip is far smaller than this.
 const MAX_AUDIO_BYTES = 3 * 1024 * 1024;
@@ -24,11 +37,6 @@ const EXTENSIONS = {
   'audio/webm': 'webm', 'audio/mp4': 'mp4', 'audio/x-m4a': 'm4a', 'audio/m4a': 'm4a',
   'audio/ogg': 'ogg', 'audio/mpeg': 'mp3', 'audio/wav': 'wav', 'audio/x-wav': 'wav',
 };
-
-// Whisper sometimes "hears" these when the recording is silent or just noise.
-const SILENCE_HALLUCINATIONS = new Set(['thank you', 'thank you.', 'thanks.', 'thanks for watching', 'thanks for watching!', 'you', 'bye', 'bye.', '.']);
-
-const PROMPT_INTRO = 'Questions about a dairy farm: milk, heat, insemination, vaccination, feed, expenses.';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -44,7 +52,9 @@ export default async function handler(req, res) {
     return;
   }
 
-  const { audio, mime, names } = req.body || {};
+  const { audio, mime, names, language } = req.body || {};
+  const langCode = LANGUAGES[language] ? language : 'en';
+  const lang = LANGUAGES[langCode];
   if (!audio || typeof audio !== 'string') {
     res.status(400).json({ error: 'No audio received.' });
     return;
@@ -67,7 +77,7 @@ export default async function handler(req, res) {
   const nameList = Array.isArray(names)
     ? names.filter((n) => typeof n === 'string' && n.trim()).slice(0, 30).map((n) => n.trim().slice(0, 24)).join(', ')
     : '';
-  const prompt = (PROMPT_INTRO + (nameList ? ` Cow names: ${nameList}.` : '')).slice(0, 600);
+  const prompt = (lang.intro + (nameList ? ` ${lang.namesLabel} ${nameList}.` : '')).slice(0, 600);
 
   const transcribe = (model) => {
     const form = new FormData();
@@ -75,14 +85,14 @@ export default async function handler(req, res) {
     form.append('model', model);
     form.append('response_format', 'json');
     form.append('temperature', '0');
-    form.append('language', LANGUAGE);
+    form.append('language', langCode);
     form.append('prompt', prompt);
     return fetch(GROQ_STT_URL, { method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form });
   };
 
   try {
     let last = null;
-    for (const model of MODELS) {
+    for (const model of lang.models) {
       const response = await transcribe(model);
       const data = await response.json().catch(() => ({}));
 
@@ -90,7 +100,7 @@ export default async function handler(req, res) {
         const text = String((data && data.text) || '').trim();
         const lowered = text.toLowerCase();
         // Silence can make Whisper echo our prompt or invent a stock phrase — treat both as "nothing heard".
-        if (!text || text.length < 2 || lowered.includes('questions about a dairy farm') || SILENCE_HALLUCINATIONS.has(lowered)) {
+        if (!text || text.length < 2 || lowered.includes(lang.intro.slice(0, 18).toLowerCase()) || lang.silence.includes(lowered)) {
           res.status(422).json({ error: "I couldn't hear anything — try again, a little closer to the microphone." });
           return;
         }
