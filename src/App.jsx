@@ -64,16 +64,19 @@ const FONTS = (
 
 // ---------- Helpers ----------
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-const todayStr = () => new Date().toISOString().slice(0, 10);
+// Dates are handled in the phone's LOCAL calendar. (toISOString() converts to UTC, which in India
+// made "today" show yesterday before 5:30 AM and pushed other dates one day early.)
+const toLocalISO = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const todayStr = () => toLocalISO(new Date());
 const addDays = (dateStr, n) => {
   const d = new Date(dateStr + 'T00:00:00');
   d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
+  return toLocalISO(d);
 };
 const addMonths = (dateStr, n) => {
   const d = new Date(dateStr + 'T00:00:00');
   d.setMonth(d.getMonth() + n);
-  return d.toISOString().slice(0, 10);
+  return toLocalISO(d);
 };
 const diffDays = (dateStr) => {
   const d = new Date(dateStr + 'T00:00:00');
@@ -3591,12 +3594,277 @@ function MilkForm({ cows, milk, defaultCowId, onClose, onSave }) {
   );
 }
 
+// ---------- Voice recorder (used by voice milk entry) ----------
+function useVoiceRecorder({ maxSeconds = 60, onAudio, onProblem }) {
+  const [state, setState] = useState('idle'); // 'idle' | 'recording'
+  const [secs, setSecs] = useState(0);
+  const recorderRef = useRef(null);
+  const streamRef = useRef(null);
+  const chunksRef = useRef([]);
+  const timerRef = useRef(null);
+  const startedRef = useRef(0);
+  const cancelRef = useRef(false);
+  const cb = useRef({});
+  cb.current = { onAudio, onProblem };
+  const supported = typeof window !== 'undefined' && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) && typeof window.MediaRecorder !== 'undefined';
+
+  const release = () => {
+    clearInterval(timerRef.current);
+    if (streamRef.current) { streamRef.current.getTracks().forEach((t) => t.stop()); streamRef.current = null; }
+  };
+  // Turn the microphone off if the screen is closed while recording
+  useEffect(() => () => {
+    cancelRef.current = true;
+    try { if (recorderRef.current && recorderRef.current.state !== 'inactive') recorderRef.current.stop(); } catch (e) { /* ignore */ }
+    release();
+  }, []);
+
+  const stop = (cancel) => {
+    cancelRef.current = !!cancel;
+    clearInterval(timerRef.current);
+    const r = recorderRef.current;
+    if (r && r.state !== 'inactive') r.stop();
+    else { release(); setState('idle'); }
+  };
+
+  const start = async () => {
+    if (state !== 'idle') return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      streamRef.current = stream;
+      const mimeType = pickRecorderMime();
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      chunksRef.current = [];
+      cancelRef.current = false;
+      recorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunksRef.current.push(e.data); };
+      recorder.onstop = () => {
+        const ms = Date.now() - startedRef.current;
+        const mime = recorder.mimeType || mimeType || 'audio/webm';
+        release();
+        setState('idle');
+        if (cancelRef.current) return;
+        if (ms < 800 || chunksRef.current.length === 0) {
+          if (cb.current.onProblem) cb.current.onProblem("I didn't catch that — tap the mic, speak for a moment, then tap Done.");
+          return;
+        }
+        if (cb.current.onAudio) cb.current.onAudio({ blob: new Blob(chunksRef.current, { type: mime }), mime, seconds: ms / 1000 });
+      };
+      recorderRef.current = recorder;
+      recorder.start();
+      startedRef.current = Date.now();
+      setSecs(0);
+      setState('recording');
+      timerRef.current = setInterval(() => {
+        const s = Math.floor((Date.now() - startedRef.current) / 1000);
+        setSecs(s);
+        if (s >= maxSeconds) stop(false);
+      }, 250);
+    } catch (err) {
+      release();
+      const n = err && err.name;
+      if (cb.current.onProblem) {
+        cb.current.onProblem(
+          n === 'NotAllowedError' || n === 'SecurityError'
+            ? 'Microphone access is blocked. Allow the microphone for this site in your browser settings, then try again.'
+            : n === 'NotFoundError'
+              ? 'No microphone was found on this device.'
+              : "Couldn't start the microphone. Please try again."
+        );
+      }
+    }
+  };
+
+  return { state, secs, start, stop, supported };
+}
+
+// ---------- Voice milk entry: matching spoken names to real cows ----------
+// Speech recognition spells Indian names in many ways (Laxmi/Lakshmi, Radhe/Radha), so names are
+// compared by sound-alike keys rather than exact spelling.
+const nameKey = (s) => {
+  let t = String(s || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+  t = t.replace(/[^a-z\u0C80-\u0CFF]/g, '');
+  return t
+    .replace(/x/g, 'ks').replace(/ph/g, 'f').replace(/(kh|gh|dh|th|bh|jh)/g, (m) => m[0])
+    .replace(/sh/g, 's').replace(/ow|ou/g, 'au').replace(/w/g, 'v').replace(/z/g, 'j').replace(/c/g, 'k').replace(/q/g, 'k')
+    .replace(/ee/g, 'i').replace(/oo/g, 'u').replace(/y$/, 'i').replace(/(.)\1+/g, '$1');
+};
+const editDistance = (a, b) => {
+  const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+  }
+  return dp[a.length][b.length];
+};
+const nameScore = (spoken, real) => {
+  const a = nameKey(spoken), b = nameKey(real);
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  const sim = (x, y) => 1 - editDistance(x, y) / Math.max(x.length, y.length);
+  const skel = (k) => k[0] + k.slice(1).replace(/[aeiou]/g, ''); // consonant skeleton: ignores vowel slips
+  const sa = skel(a), sb = skel(b);
+  const skelSim = sa.length >= 2 && sb.length >= 2 ? sim(sa, sb) * 0.9 : 0;
+  return Math.max(sim(a, b), skelSim);
+};
+const sameTag = (a, b) => {
+  const x = String(a || '').replace(/\D/g, '').replace(/^0+/, '');
+  const y = String(b || '').replace(/\D/g, '').replace(/^0+/, '');
+  return !!x && x === y;
+};
+// -> { cowId, conf: 'high' | 'uncertain' | 'none' }
+function matchSpokenCow(entry, cows) {
+  if (entry.tag) {
+    const hit = cows.find((c) => sameTag(c.tagNumber, entry.tag));
+    if (hit) return { cowId: hit.id, conf: 'high' };
+  }
+  const scored = cows
+    .map((c) => ({ c, s: Math.max(nameScore(entry.name_latin, c.name), nameScore(entry.heard, c.name)) }))
+    .sort((x, y) => y.s - x.s);
+  const best = scored[0], second = scored[1];
+  if (!best || best.s < 0.55) return { cowId: '', conf: 'none' };
+  const clear = best.s >= 0.85 && (!second || best.s - second.s >= 0.08);
+  return { cowId: best.c.id, conf: clear ? 'high' : 'uncertain' };
+}
+
+
+function buildVoiceRows(entries, cows) {
+  const stamp = Date.now();
+  return entries.map((e, i) => {
+    const m = matchSpokenCow(e, cows);
+    return { key: `${stamp}-${i}`, heard: String(e.heard || e.name_latin || e.tag || '').slice(0, 40), cowId: m.cowId, conf: m.conf, liters: String(e.liters) };
+  });
+}
+
+// Review screen shown after speaking: fix anything wrong, then save.
+function MilkVoiceReview({ cows, milk, date, session, setDate, setSession, heard, rows, setRows, onSpeakAgain, onBackToList, onSave, onClose }) {
+  const r1 = (n) => Math.round(Number(n || 0) * 10) / 10;
+  const cowById = Object.fromEntries(cows.map((c) => [c.id, c]));
+  const update = (i, patch) => setRows((rs) => rs.map((r, k) => (k === i ? { ...r, ...patch } : r)));
+  const remove = (i) => setRows((rs) => rs.filter((_, k) => k !== i));
+  const counts = {};
+  rows.forEach((r) => { if (r.cowId) counts[r.cowId] = (counts[r.cowId] || 0) + 1; });
+
+  const usualFor = (cowId) => {
+    const past = milk.filter((m) => m.cowId === cowId && m.session === session && m.date !== date).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 7);
+    return past.length ? past.reduce((s, m) => s + Number(m.liters || 0), 0) / past.length : 0;
+  };
+  const notesFor = (r) => {
+    const out = [];
+    const cow = cowById[r.cowId];
+    const lit = Number(r.liters);
+    if (r.conf === 'uncertain') out.push({ tone: 'warn', text: `Heard “${r.heard}” — please confirm the cow` });
+    if (!r.cowId) out.push({ tone: 'bad', text: `Couldn't match “${r.heard}” — choose the cow or remove this line` });
+    if (cow && counts[r.cowId] > 1) out.push({ tone: 'warn', text: 'Mentioned more than once — the last value is used' });
+    if (cow && r.liters !== '' && Number.isFinite(lit)) {
+      const avg = usualFor(r.cowId);
+      if (lit > 30) out.push({ tone: 'warn', text: 'That is a lot for one cow — check the number' });
+      else if (avg >= 2 && lit > Math.max(avg * 1.8, avg + 6)) out.push({ tone: 'warn', text: `Higher than usual (usually about ${r1(avg)} L)` });
+      else if (avg >= 2 && lit < avg * 0.35) out.push({ tone: 'warn', text: `Lower than usual (usually about ${r1(avg)} L)` });
+      const existing = milk.find((m) => m.cowId === r.cowId && m.date === date && m.session === session);
+      if (existing) out.push({ tone: 'info', text: `Replaces ${existing.liters} L already saved` });
+    }
+    return out;
+  };
+
+  const rowValid = (r) => !!r.cowId && r.liters !== '' && Number.isFinite(Number(r.liters)) && Number(r.liters) >= 0;
+  const invalid = rows.length === 0 || rows.some((r) => !rowValid(r));
+  const byCow = new Map();
+  rows.forEach((r) => { if (rowValid(r)) byCow.set(r.cowId, Number(r.liters)); }); // last one wins
+  const total = [...byCow.values()].reduce((s, v) => s + v, 0);
+  const notMentioned = cows.filter((c) => !byCow.has(c.id));
+  const buildEntries = () => [...byCow.entries()].map(([cowId, liters]) => {
+    const existing = milk.find((m) => m.cowId === cowId && m.date === date && m.session === session);
+    return { cowId, liters: Math.round(liters * 100) / 100, existingId: existing ? existing.id : null };
+  });
+  const toneStyle = { warn: { color: C.amber }, bad: { color: C.rust }, info: { color: C.sub } };
+
+  return (
+    <Modal title="Check before saving" onClose={onClose}>
+      <div className="ff-body" style={{ background: C.greySoft, borderRadius: 12, padding: '9px 12px', fontSize: 13.5, color: C.sub, marginBottom: 12, lineHeight: 1.45 }}>
+        <b style={{ color: C.ink }}>I heard:</b> “{heard}”
+      </div>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 12 }}>
+        <input type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} max={todayStr()} style={{ ...inputStyle, flex: 1, minWidth: 0 }} />
+        <Segmented options={['AM', 'PM']} value={session} onChange={setSession} />
+      </div>
+
+      {rows.map((r, i) => {
+        const cow = cowById[r.cowId];
+        const notes = notesFor(r);
+        const attention = r.conf !== 'high' || !r.cowId;
+        return (
+          <div key={r.key} style={{ background: attention ? '#FFF7E6' : '#fff', border: `1px solid ${attention ? '#F2B544' : C.line}`, borderRadius: 14, padding: '8px 10px', marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {cow ? <CowAvatar size={40} status={cow.status} radius={12} /> : <div style={{ width: 40, height: 40, borderRadius: 12, background: C.greySoft, flexShrink: 0 }} />}
+              <select
+                value={r.cowId}
+                onChange={(e) => update(i, { cowId: e.target.value, conf: e.target.value ? 'high' : 'none' })}
+                aria-label="Cow"
+                style={{ ...inputStyle, flex: 1, minWidth: 0, padding: '8px 8px', fontSize: 15, fontWeight: 700 }}
+              >
+                <option value="">Choose cow…</option>
+                {cows.map((c) => <option key={c.id} value={c.id}>{c.name} (#{c.tagNumber})</option>)}
+              </select>
+              <input
+                type="number" min={0} step="0.1" value={r.liters} aria-label="Litres"
+                onChange={(e) => update(i, { liters: e.target.value })}
+                style={{ ...inputStyle, width: 68, textAlign: 'right', padding: '8px 8px' }}
+              />
+              <span className="ff-body" style={{ fontSize: 13, color: C.sub }}>L</span>
+              <button onClick={() => remove(i)} aria-label="Remove this line" style={{ background: 'none', border: 'none', padding: 4, display: 'flex' }}>
+                <X size={18} color={C.grey} />
+              </button>
+            </div>
+            {notes.map((n, k) => (
+              <div key={k} className="ff-body" style={{ fontSize: 12.5, fontWeight: 600, marginTop: 5, marginLeft: 48, ...toneStyle[n.tone] }}>{n.text}</div>
+            ))}
+          </div>
+        );
+      })}
+      {rows.length === 0 && <MutedNote text="All lines were removed. Tap “Speak again” or go back to the list." />}
+
+      {notMentioned.length > 0 && (
+        <div className="ff-body" style={{ fontSize: 13.5, color: C.sub, margin: '4px 2px 10px', lineHeight: 1.45 }}>
+          Not mentioned: <b style={{ color: C.ink }}>{notMentioned.slice(0, 6).map((c) => c.name).join(', ')}{notMentioned.length > 6 ? ` +${notMentioned.length - 6} more` : ''}</b> — will be skipped
+        </div>
+      )}
+      <div style={{ background: C.brandSoft, borderRadius: 12, padding: '9px 12px', marginBottom: 12, display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
+        <span style={{ color: C.brandDark, fontWeight: 700 }}>{byCow.size} of {cows.length} cows</span>
+        <span style={{ color: C.brandDark, fontWeight: 800 }}>{r1(total)} L total</span>
+      </div>
+
+      <PrimaryButton disabled={invalid} onClick={() => onSave({ date, session, entries: buildEntries() })}>
+        Save {byCow.size} {byCow.size === 1 ? 'entry' : 'entries'}
+      </PrimaryButton>
+      <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+        <button onClick={onSpeakAgain} className="ff-body" style={{ flex: 1, background: C.greySoft, color: C.ink, border: 'none', borderRadius: 12, padding: '12px 0', fontSize: 15, fontWeight: 700 }}>Speak again</button>
+        <button onClick={() => onBackToList(rows.filter(rowValid))} className="ff-body" style={{ flex: 1, background: C.brandSoft, color: C.brand, border: 'none', borderRadius: 12, padding: '12px 0', fontSize: 15, fontWeight: 700 }}>Edit in list</button>
+      </div>
+    </Modal>
+  );
+}
+
 function MilkBatchForm({ cows, milk, onClose, onSave }) {
   const [date, setDate] = useState(todayStr());
   const [session, setSession] = useState('AM');
   const [mode, setMode] = useState('Per cow');
   const [values, setValues] = useState({}); // cowId -> string liters
   const [totalLiters, setTotalLiters] = useState('');
+  const [copied, setCopied] = useState({}); // cowId -> true while a value is a copy of "last time"
+  const [copyMsg, setCopyMsg] = useState('');
+  const [voice, setVoice] = useState('idle'); // 'idle' | 'processing' | 'review'  (recording state comes from the recorder)
+  const [voiceError, setVoiceError] = useState('');
+  const [heard, setHeard] = useState('');
+  const [rows, setRows] = useState([]);
+  const [lang, setLang] = useState(() => {
+    try { return localStorage.getItem('askAiLang') === 'kn' ? 'kn' : 'en'; } catch (e) { return 'en'; }
+  });
+  const changeLang = (l) => {
+    setLang(l);
+    try { localStorage.setItem('askAiLang', l); } catch (e) { /* ignore */ }
+  };
 
   // Whenever date/session changes, prefill from any existing entries for that date+session
   useEffect(() => {
@@ -3606,9 +3874,67 @@ function MilkBatchForm({ cows, milk, onClose, onSave }) {
       if (existing) prefill[c.id] = String(existing.liters);
     });
     setValues(prefill);
+    setCopied({});
+    setCopyMsg('');
   }, [date, session]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const setVal = (cowId, v) => setValues((prev) => ({ ...prev, [cowId]: v }));
+  const setVal = (cowId, v) => {
+    setValues((prev) => ({ ...prev, [cowId]: v }));
+    setCopied((prev) => { if (!prev[cowId]) return prev; const n = { ...prev }; delete n[cowId]; return n; });
+  };
+
+  const example = cows.length > 1 ? `${cows[0].name} 8, ${cows[1].name} 6.5` : cows.length === 1 ? `${cows[0].name} 8` : 'Ganga 8, Lakshmi 6.5';
+
+  // ----- voice: record -> transcribe -> read the numbers -> review -----
+  const handleAudio = async ({ blob, mime }) => {
+    setVoiceError('');
+    setVoice('processing');
+    const fail = (msg) => { setVoice('idle'); setVoiceError(msg); };
+    try {
+      const audio = await blobToBase64(blob);
+      const t = await fetch('/api/transcribe', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audio, mime, names: cows.map((c) => c.name), language: lang, mode: 'milk' }),
+      });
+      const td = await t.json().catch(() => ({}));
+      if (!t.ok || !td.text) { fail(td.error || "Couldn't understand the recording. Please try again."); return; }
+      const p = await fetch('/api/parse-milk', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transcript: td.text, language: lang, cows: cows.map((c) => ({ name: c.name, tag: c.tagNumber })) }),
+      });
+      const pd = await p.json().catch(() => ({}));
+      if (!p.ok) { fail(pd.error || "Couldn't read the milk numbers. Please try again."); return; }
+      if (!pd.entries || pd.entries.length === 0) {
+        fail(`I heard “${td.text.slice(0, 80)}” but couldn't find a cow with litres. Try saying: “${example}”.`);
+        return;
+      }
+      setHeard(td.text);
+      setRows(buildVoiceRows(pd.entries, cows));
+      if (pd.session === 'AM' || pd.session === 'PM') setSession(pd.session);
+      if (pd.day === 'yesterday') setDate(addDays(todayStr(), -1));
+      else if (pd.day === 'today') setDate(todayStr());
+      setVoice('review');
+    } catch (e) {
+      fail("Couldn't process the recording — check your connection and try again.");
+    }
+  };
+  const recorder = useVoiceRecorder({ maxSeconds: 90, onAudio: handleAudio, onProblem: (m) => setVoiceError(m) });
+  const startVoice = () => { setVoiceError(''); recorder.start(); };
+
+  // ----- start from the last entry of each cow -----
+  const copyLast = () => {
+    const next = {};
+    cows.forEach((c) => {
+      if (values[c.id] !== undefined && values[c.id] !== '') return; // never overwrite what's already typed
+      const last = milk.filter((m) => m.cowId === c.id && m.session === session && m.date < date).sort((a, b) => b.date.localeCompare(a.date))[0];
+      if (last) next[c.id] = String(last.liters);
+    });
+    const n = Object.keys(next).length;
+    if (n === 0) { setCopyMsg(`No earlier ${session} entries to copy.`); return; }
+    setValues((prev) => ({ ...prev, ...next }));
+    setCopied((prev) => ({ ...prev, ...Object.fromEntries(Object.keys(next).map((id) => [id, true])) }));
+    setCopyMsg(`Filled ${n} cow${n === 1 ? '' : 's'} from their last ${session} entry (blue boxes) — change only what's different.`);
+  };
 
   const filledCount = Object.values(values).filter((v) => v !== '' && v !== undefined).length;
   const total = Object.values(values).reduce((s, v) => s + (v ? Number(v) : 0), 0);
@@ -3645,6 +3971,75 @@ function MilkBatchForm({ cows, milk, onClose, onSave }) {
     onSave({ date, session, entries });
   };
 
+  if (voice === 'review') {
+    return (
+      <MilkVoiceReview
+        cows={cows} milk={milk} date={date} session={session} setDate={setDate} setSession={setSession}
+        heard={heard} rows={rows} setRows={setRows} onClose={onClose}
+        onSave={onSave}
+        onSpeakAgain={() => { setVoice('idle'); setRows([]); startVoice(); }}
+        onBackToList={(valid) => {
+          const mapped = {};
+          valid.forEach((r) => { mapped[r.cowId] = String(r.liters); });
+          setValues((prev) => ({ ...prev, ...mapped }));
+          setVoice('idle');
+        }}
+      />
+    );
+  }
+
+  const langPill = (
+    <div role="group" aria-label="Voice language" style={{ display: 'flex', background: 'rgba(255,255,255,0.22)', borderRadius: 10, padding: 2, flexShrink: 0 }}>
+      {[['en', 'EN'], ['kn', 'ಕನ್ನಡ']].map(([code, text]) => (
+        <button
+          key={code} onClick={() => changeLang(code)} aria-pressed={lang === code} className="ff-body"
+          style={{ border: 'none', borderRadius: 8, padding: '5px 8px', fontSize: 12.5, fontWeight: 700, background: lang === code ? '#fff' : 'transparent', color: lang === code ? C.brandDark : '#fff' }}
+        >
+          {text}
+        </button>
+      ))}
+    </div>
+  );
+
+  const voicePanel = recorder.supported && mode === 'Per cow' ? (
+    recorder.state === 'recording' ? (
+      <div style={{ background: C.brandSoft, borderRadius: 18, padding: 14, marginBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+          <span className="rec-dot" />
+          <span className="ff-display" style={{ fontSize: 22, color: C.ink }}>{fmtTimer(recorder.secs)}</span>
+          <span className="ff-body" style={{ fontSize: 14, color: C.sub }}>Listening…</span>
+        </div>
+        <div className="ff-body" style={{ fontSize: 14, color: C.sub, lineHeight: 1.45, marginBottom: 12 }}>
+          Say each cow's name, then the litres — for example “{example}”. You can name all the cows in one go.
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={() => recorder.stop(true)} className="ff-body" style={{ flex: 1, background: '#fff', color: C.ink, border: `1px solid ${C.line}`, borderRadius: 12, padding: '12px 0', fontSize: 15, fontWeight: 700 }}>Cancel</button>
+          <button onClick={() => recorder.stop(false)} className="ff-body" style={{ flex: 2, background: C.brand, color: '#fff', border: 'none', borderRadius: 12, padding: '12px 0', fontSize: 16, fontWeight: 700 }}>Done</button>
+        </div>
+      </div>
+    ) : voice === 'processing' ? (
+      <div className="ff-body" style={{ background: C.brandSoft, borderRadius: 18, padding: '18px 14px', marginBottom: 12, textAlign: 'center', fontSize: 15, color: C.brandDark, fontWeight: 600 }}>
+        Understanding what you said…
+      </div>
+    ) : (
+      <div style={{ marginBottom: 12 }}>
+        {voiceError && (
+          <div className="ff-body" style={{ background: C.rustSoft, color: C.rust, borderRadius: 12, padding: '10px 12px', fontSize: 13.5, marginBottom: 8, lineHeight: 1.4 }}>{voiceError}</div>
+        )}
+        <div style={{ background: `linear-gradient(135deg, ${C.brand}, ${C.brandDark})`, borderRadius: 18, padding: 12, display: 'flex', alignItems: 'center', gap: 12, color: '#fff', boxShadow: `0 10px 20px rgba(${C.brandRgb},0.3)` }}>
+          <button onClick={startVoice} aria-label="Speak the milk" style={{ width: 50, height: 50, borderRadius: 25, border: 'none', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <Mic size={24} color={C.brand} />
+          </button>
+          <div onClick={startVoice} style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}>
+            <div className="ff-display" style={{ fontSize: 17 }}>Speak the milk</div>
+            <div className="ff-body" style={{ fontSize: 13, opacity: 0.92, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Say “{example}…”</div>
+          </div>
+          {langPill}
+        </div>
+      </div>
+    )
+  ) : null;
+
   return (
     <Modal title="Log Milk" onClose={onClose}>
       <Field label="Date"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} max={todayStr()} /></Field>
@@ -3655,6 +4050,8 @@ function MilkBatchForm({ cows, milk, onClose, onSave }) {
       ) : (
         <>
           <Field label="Entry mode"><Segmented options={['Per cow', 'Total (herd)']} value={mode} onChange={setMode} /></Field>
+
+          {voicePanel}
 
           {mode === 'Total (herd)' ? (
             <>
@@ -3683,9 +4080,15 @@ function MilkBatchForm({ cows, milk, onClose, onSave }) {
             </>
           ) : (
             <>
-              <div className="ff-body" style={{ fontSize: 12.5, fontWeight: 600, color: C.sub, marginBottom: 6 }}>
-                Enter liters for each cow — leave blank to skip a cow for this session.
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <div className="ff-body" style={{ fontSize: 12.5, fontWeight: 600, color: C.sub, flex: 1, lineHeight: 1.4 }}>
+                  Enter liters for each cow — leave blank to skip a cow for this session.
+                </div>
+                <button onClick={copyLast} className="ff-body" style={{ flexShrink: 0, background: C.brandSoft, color: C.brand, border: 'none', borderRadius: 10, padding: '7px 11px', fontSize: 13, fontWeight: 700 }}>
+                  Copy last {session}
+                </button>
               </div>
+              {copyMsg && <div className="ff-body" style={{ fontSize: 12.5, color: C.brandDark, background: C.brandSoft, borderRadius: 10, padding: '7px 10px', marginBottom: 8, lineHeight: 1.4 }}>{copyMsg}</div>}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
                 {cows.map((c) => (
                   <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: `1px solid ${C.line}`, borderRadius: 10, padding: '8px 10px' }}>
@@ -3697,7 +4100,7 @@ function MilkBatchForm({ cows, milk, onClose, onSave }) {
                     <input
                       type="number" min={0} step="0.1" placeholder="—" value={values[c.id] ?? ''}
                       onChange={(e) => setVal(c.id, e.target.value)}
-                      style={{ ...inputStyle, width: 76, textAlign: 'right', padding: '8px 10px' }}
+                      style={{ ...inputStyle, width: 76, textAlign: 'right', padding: '8px 10px', ...(copied[c.id] ? { background: C.brandSoft, borderColor: C.brand, color: C.brandDark } : {}) }}
                     />
                     <span className="ff-body" style={{ fontSize: 13, color: C.sub }}>L</span>
                   </div>
