@@ -42,15 +42,15 @@ const C = {
 
 const FONTS = (
   <style>{`
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@600;700;800&family=Inter:wght@400;500;600;700&family=Noto+Sans+Kannada:wght@400;600;700&display=swap');
     html, body, #root { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; }
     .app-shell { height: 100vh; height: 100dvh; }
-    .ff-display { font-family: 'Plus Jakarta Sans', 'Inter', sans-serif; font-weight: 800 !important; letter-spacing: -0.01em; }
-    .ff-body { font-family: 'Inter', sans-serif; }
+    .ff-display { font-family: 'Plus Jakarta Sans', 'Inter', 'Noto Sans Kannada', sans-serif; font-weight: 800 !important; letter-spacing: -0.01em; }
+    .ff-body { font-family: 'Inter', 'Noto Sans Kannada', sans-serif; }
     .rec-dot { width: 12px; height: 12px; border-radius: 50%; background: #E5484D; flex-shrink: 0; animation: recPulse 1.1s ease-in-out infinite; }
     @keyframes recPulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(1.3); } }
     * { -webkit-tap-highlight-color: transparent; }
-    button { font-family: 'Inter', sans-serif; cursor: pointer; }
+    button { font-family: 'Inter', 'Noto Sans Kannada', sans-serif; cursor: pointer; }
     button:active { transform: scale(0.98); }
     ::-webkit-scrollbar { display: none; }
     .print-area { display: none; }
@@ -608,7 +608,7 @@ function Field({ label, children }) {
 
 const inputStyle = {
   width: '100%', border: `1.5px solid ${C.line}`, borderRadius: 12, padding: '12px 14px',
-  fontSize: 16, fontFamily: 'Inter, sans-serif', color: C.ink, background: '#fff', outline: 'none', boxSizing: 'border-box',
+  fontSize: 16, fontFamily: "Inter, 'Noto Sans Kannada', sans-serif", color: C.ink, background: '#fff', outline: 'none', boxSizing: 'border-box',
 };
 
 function Modal({ title, onClose, children }) {
@@ -1924,6 +1924,13 @@ function AskAIPanel({ farmData, farmName, focusCow, onClose }) {
   const [busy, setBusy] = useState(false);
   const [rec, setRec] = useState('idle'); // 'idle' | 'recording' | 'transcribing'
   const [secs, setSecs] = useState(0);
+  const [lang, setLang] = useState(() => {
+    try { return localStorage.getItem('askAiLang') === 'kn' ? 'kn' : 'en'; } catch (e) { return 'en'; }
+  });
+  const changeLang = (l) => {
+    setLang(l);
+    try { localStorage.setItem('askAiLang', l); } catch (e) { /* ignore */ }
+  };
   const scrollRef = useRef(null);
   const recorderRef = useRef(null);
   const streamRef = useRef(null);
@@ -1933,7 +1940,7 @@ function AskAIPanel({ farmData, farmName, focusCow, onClose }) {
   const cancelledRef = useRef(false);
   // Always read the latest props/state from async callbacks (recorder events fire later)
   const latest = useRef({});
-  latest.current = { farmData, farmName, focusCow, messages, busy };
+  latest.current = { farmData, farmName, focusCow, messages, busy, lang };
 
   const voiceSupported = typeof window !== 'undefined' && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) && typeof window.MediaRecorder !== 'undefined';
 
@@ -1970,7 +1977,7 @@ function AskAIPanel({ farmData, farmName, focusCow, onClose }) {
       const res = await fetch('/api/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, context, history, focusCow: fc ? `${fc.name} (#${fc.tagNumber})` : null }),
+        body: JSON.stringify({ question, context, history, focusCow: fc ? `${fc.name} (#${fc.tagNumber})` : null, language: latest.current.lang }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -2002,7 +2009,7 @@ function AskAIPanel({ farmData, farmName, focusCow, onClose }) {
       const res = await fetch('/api/transcribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ audio, mime, names }),
+        body: JSON.stringify({ audio, mime, names, language: latest.current.lang }),
       });
       const data = await res.json().catch(() => ({}));
       setRec('idle');
@@ -2069,9 +2076,23 @@ function AskAIPanel({ farmData, farmName, focusCow, onClose }) {
           <div style={{ width: 32, height: 32, borderRadius: 16, background: 'rgba(255,255,255,0.18)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Sparkles size={16} color="#fff" />
           </div>
-          <div style={{ flex: 1 }}>
-            <div className="ff-display" style={{ fontWeight: 700, fontSize: 16, color: '#fff' }}>Ask about your farm</div>
-            <div style={{ fontSize: 12.5, color: 'rgba(255,255,255,0.8)' }}>{focusCow ? `Focused on ${focusCow.name}` : 'Animals, health, milk & finance'}</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="ff-display" style={{ fontWeight: 700, fontSize: 16, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Ask about your farm</div>
+            <div style={{ fontSize: 12.5, color: 'rgba(255,255,255,0.8)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{focusCow ? `Focused on ${focusCow.name}` : 'Animals, health, milk & finance'}</div>
+          </div>
+          <div role="group" aria-label="Language" style={{ display: 'flex', background: 'rgba(255,255,255,0.2)', borderRadius: 12, padding: 3, flexShrink: 0 }}>
+            {[['en', 'EN'], ['kn', 'ಕನ್ನಡ']].map(([code, text]) => (
+              <button
+                key={code}
+                onClick={() => changeLang(code)}
+                disabled={rec !== 'idle'}
+                aria-pressed={lang === code}
+                className="ff-body"
+                style={{ border: 'none', borderRadius: 9, padding: '6px 10px', fontSize: 13.5, fontWeight: 700, background: lang === code ? '#fff' : 'transparent', color: lang === code ? C.brandDark : '#fff' }}
+              >
+                {text}
+              </button>
+            ))}
           </div>
           <button onClick={onClose} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: 10, padding: 8, display: 'flex' }}>
             <X size={16} color="#fff" />
@@ -2116,7 +2137,7 @@ function AskAIPanel({ farmData, farmName, focusCow, onClose }) {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-                placeholder={voiceSupported ? 'Type, or tap the mic to speak…' : 'Ask about your animals, health, milk, or finances…'}
+                placeholder={lang === 'kn' ? 'ಇಲ್ಲಿ ಟೈಪ್ ಮಾಡಿ ಅಥವಾ ಮೈಕ್ ಒತ್ತಿ ಮಾತನಾಡಿ…' : voiceSupported ? 'Type, or tap the mic to speak…' : 'Ask about your animals, health, milk, or finances…'}
                 rows={1}
                 className="ff-body"
                 style={{ flex: 1, resize: 'none', maxHeight: 90, border: `1.5px solid ${C.line}`, borderRadius: 14, padding: '11px 13px', fontSize: 16, outline: 'none', fontFamily: 'inherit' }}
