@@ -23,11 +23,20 @@
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
-// Fastest first. Each model has its own free limits, so falling back to the
-// second one effectively doubles what you can ask per minute / per day.
-const MODELS = ['openai/gpt-oss-20b', 'openai/gpt-oss-120b'];
+// Each model has its own free limits, so falling back to the second one
+// effectively doubles what you can ask per minute / per day.
+// English: fastest model first. Kannada: the larger model first (better Kannada).
+const MODELS_BY_LANGUAGE = {
+  en: ['openai/gpt-oss-20b', 'openai/gpt-oss-120b'],
+  kn: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'],
+};
 
 const MAX_CONTEXT_CHARS = 15000; // hard safety cap (keeps requests under the free per-minute token limit)
+
+const LANGUAGE_RULES = {
+  en: '- Always reply in English, even if the question looks like it is in another language (it may be a mis-heard voice recording — just answer the most likely farm question, or ask the person to repeat it).',
+  kn: '- Always reply in Kannada (ಕನ್ನಡ script). Keep animal names, numbers, dates and the ₹ sign exactly as in the data (write numbers with digits). The question may be typed or spoken in Kannada and may spell animal names in Kannada script — match them to the English names in the data. If the question looks mis-heard or unclear, politely ask the person to repeat it in Kannada.',
+};
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -35,7 +44,8 @@ export default async function handler(req, res) {
     return;
   }
 
-  const { question, context, history, focusCow } = req.body || {};
+  const { question, context, history, focusCow, language } = req.body || {};
+  const lang = language === 'kn' ? 'kn' : 'en';
 
   if (!question || typeof question !== 'string' || !question.trim()) {
     res.status(400).json({ error: 'Missing question.' });
@@ -61,7 +71,7 @@ Rules:
 - Dates are YYYY-MM-DD. "TODAY" in the data header is the current date.
 - The data only covers the windows listed under DATA WINDOWS. If the question needs older or missing data, say so plainly instead of guessing.
 - Currency is Indian rupees (₹); milk is in litres.
-- Always reply in English, even if the question looks like it is in another language (it may be a mis-heard voice recording — just answer the most likely farm question, or ask the person to repeat it).
+${LANGUAGE_RULES[lang]}
 
 FARM DATA:
 ${contextText}`;
@@ -78,7 +88,7 @@ ${contextText}`;
       { role: 'user', content: question.slice(0, 1000) },
     ],
     temperature: 0.3,
-    max_completion_tokens: 900,
+    max_completion_tokens: lang === 'kn' ? 1400 : 900, // Kannada text uses more tokens
   };
 
   const callGroq = (model, withReasoningOptions) => fetch(GROQ_URL, {
@@ -94,7 +104,7 @@ ${contextText}`;
 
   try {
     let last = null; // { status, data }
-    for (const model of MODELS) {
+    for (const model of MODELS_BY_LANGUAGE[lang]) {
       let response = await callGroq(model, true);
       let data = await response.json().catch(() => ({}));
 
