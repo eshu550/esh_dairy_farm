@@ -20,12 +20,14 @@ const LANGUAGES = {
     models: ['whisper-large-v3-turbo', 'whisper-large-v3'],
     intro: 'Questions about a dairy farm: milk, heat, insemination, vaccination, feed, expenses.',
     namesLabel: 'Cow names:',
+    milkIntro: 'Milk in litres for each cow. Example: Ganga 8, Lakshmi 6.5, Radha 7.',
     silence: ['thank you', 'thank you.', 'thanks.', 'thanks for watching', 'thanks for watching!', 'you', 'bye', 'bye.', '.'],
   },
   kn: {
     models: ['whisper-large-v3', 'whisper-large-v3-turbo'],
     intro: 'ಹೈನುಗಾರಿಕೆ ಫಾರ್ಮ್ ಬಗ್ಗೆ ಪ್ರಶ್ನೆಗಳು: ಹಾಲು, ಹಸು, ಲಸಿಕೆ, ಮೇವು, ಖರ್ಚು.',
     namesLabel: 'ಹಸುಗಳ ಹೆಸರುಗಳು:',
+    milkIntro: 'ಪ್ರತಿ ಹಸುವಿನ ಹಾಲಿನ ಪ್ರಮಾಣ ಲೀಟರ್‌ಗಳಲ್ಲಿ: ಗಂಗಾ ಎಂಟು, ಲಕ್ಷ್ಮಿ ಆರೂವರೆ.',
     silence: ['ಧನ್ಯವಾದಗಳು', 'ಧನ್ಯವಾದಗಳು.', 'ಧನ್ಯವಾದ', 'ಧನ್ಯವಾದ.', '.'],
   },
 };
@@ -52,7 +54,7 @@ export default async function handler(req, res) {
     return;
   }
 
-  const { audio, mime, names, language } = req.body || {};
+  const { audio, mime, names, language, mode } = req.body || {};
   const langCode = LANGUAGES[language] ? language : 'en';
   const lang = LANGUAGES[langCode];
   if (!audio || typeof audio !== 'string') {
@@ -77,7 +79,9 @@ export default async function handler(req, res) {
   const nameList = Array.isArray(names)
     ? names.filter((n) => typeof n === 'string' && n.trim()).slice(0, 30).map((n) => n.trim().slice(0, 24)).join(', ')
     : '';
-  const prompt = (lang.intro + (nameList ? ` ${lang.namesLabel} ${nameList}.` : '')).slice(0, 600);
+  // mode 'milk' = someone dictating "Ganga 8, Lakshmi 6.5 ..." — prime Whisper for names + numbers
+  const intro = mode === 'milk' ? lang.milkIntro : lang.intro;
+  const prompt = (intro + (nameList ? ` ${lang.namesLabel} ${nameList}.` : '')).slice(0, 600);
 
   const transcribe = (model) => {
     const form = new FormData();
@@ -100,7 +104,7 @@ export default async function handler(req, res) {
         const text = String((data && data.text) || '').trim();
         const lowered = text.toLowerCase();
         // Silence can make Whisper echo our prompt or invent a stock phrase — treat both as "nothing heard".
-        if (!text || text.length < 2 || lowered.includes(lang.intro.slice(0, 18).toLowerCase()) || lang.silence.includes(lowered)) {
+        if (!text || text.length < 2 || (lowered.includes(lang.intro.slice(0, 18).toLowerCase()) || lowered.includes(lang.milkIntro.slice(0, 18).toLowerCase())) || lang.silence.includes(lowered)) {
           res.status(422).json({ error: "I couldn't hear anything — try again, a little closer to the microphone." });
           return;
         }
