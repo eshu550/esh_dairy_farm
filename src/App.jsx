@@ -48,6 +48,8 @@ const FONTS = (
     .ff-display { font-family: 'Plus Jakarta Sans', 'Inter', 'Noto Sans Kannada', sans-serif; font-weight: 800 !important; letter-spacing: -0.01em; }
     .ff-body { font-family: 'Inter', 'Noto Sans Kannada', sans-serif; }
     .rec-dot { width: 12px; height: 12px; border-radius: 50%; background: #E5484D; flex-shrink: 0; animation: recPulse 1.1s ease-in-out infinite; }
+    .gs-pulse { animation: gsPulse 1.8s ease-in-out infinite; }
+    @keyframes gsPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
     @keyframes recPulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(1.3); } }
     * { -webkit-tap-highlight-color: transparent; }
     button { font-family: 'Inter', 'Noto Sans Kannada', sans-serif; cursor: pointer; }
@@ -551,7 +553,7 @@ function HeaderIconButton({ icon, onClick, title }) {
   );
 }
 
-function ScreenHeader({ title, subtitle, onBack, right, children }) {
+function ScreenHeader({ title, subtitle, onBack, right, children, leading, titleSize = 24 }) {
   return (
     <div style={{ background: `linear-gradient(135deg, ${C.brand} 0%, ${C.brandDark} 100%)`, color: '#fff', padding: '18px 18px 20px', paddingTop: 'max(18px, calc(env(safe-area-inset-top) + 12px))', borderRadius: '0 0 28px 28px', boxShadow: `0 10px 24px rgba(${C.brandRgb},0.22)` }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -560,8 +562,9 @@ function ScreenHeader({ title, subtitle, onBack, right, children }) {
             <ArrowLeft size={20} color="#fff" />
           </button>
         )}
+        {leading}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div className="ff-display" style={{ fontSize: 24, lineHeight: 1.15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</div>
+          <div className="ff-display" style={{ fontSize: titleSize, lineHeight: 1.15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</div>
           {subtitle && <div className="ff-body" style={{ fontSize: 14, opacity: 0.9, marginTop: 3, fontWeight: 500 }}>{subtitle}</div>}
         </div>
         {right}
@@ -671,6 +674,77 @@ function Segmented({ options, value, onChange, labels }) {
           {labels?.[opt] ?? opt}
         </button>
       ))}
+    </div>
+  );
+}
+
+// ---------- Gou Siri brand ----------
+// The name means "wealth of the cow herd". Logo: a serene cow with a golden drop (milk drop / festival tilak / prosperity).
+const GS_GOU = 'M528.0 -480.0Q509.0 -515.0 473.5 -533.5Q438.0 -552.0 390.0 -552.0Q307.0 -552.0 257.0 -497.5Q207.0 -443.0 207.0 -352.0Q207.0 -255.0 259.5 -200.5Q312.0 -146.0 404.0 -146.0Q467.0 -146.0 510.5 -178.0Q554.0 -210.0 574.0 -270.0H357.0V-396.0H729.0V-237.0Q710.0 -173.0 664.5 -118.0Q619.0 -63.0 549.0 -29.0Q479.0 5.0 391.0 5.0Q287.0 5.0 205.5 -40.5Q124.0 -86.0 78.5 -167.0Q33.0 -248.0 33.0 -352.0Q33.0 -456.0 78.5 -537.5Q124.0 -619.0 205.0 -664.5Q286.0 -710.0 390.0 -710.0Q516.0 -710.0 602.5 -649.0Q689.0 -588.0 717.0 -480.0Z M790.0 -279.0Q790.0 -365.0 828.0 -430.5Q866.0 -496.0 932.0 -531.0Q998.0 -566.0 1080.0 -566.0Q1162.0 -566.0 1228.0 -531.0Q1294.0 -496.0 1332.0 -430.5Q1370.0 -365.0 1370.0 -279.0Q1370.0 -193.0 1331.5 -127.5Q1293.0 -62.0 1226.5 -27.0Q1160.0 8.0 1078.0 8.0Q996.0 8.0 930.5 -27.0Q865.0 -62.0 827.5 -127.0Q790.0 -192.0 790.0 -279.0ZM1196.0 -279.0Q1196.0 -346.0 1162.5 -382.0Q1129.0 -418.0 1080.0 -418.0Q1030.0 -418.0 997.0 -382.5Q964.0 -347.0 964.0 -279.0Q964.0 -212.0 996.5 -176.0Q1029.0 -140.0 1078.0 -140.0Q1127.0 -140.0 1161.5 -176.0Q1196.0 -212.0 1196.0 -279.0Z M2012.0 -558.0V0.0H1841.0V-76.0Q1815.0 -39.0 1770.5 -16.5Q1726.0 6.0 1672.0 6.0Q1608.0 6.0 1559.0 -22.5Q1510.0 -51.0 1483.0 -105.0Q1456.0 -159.0 1456.0 -232.0V-558.0H1626.0V-255.0Q1626.0 -199.0 1655.0 -168.0Q1684.0 -137.0 1733.0 -137.0Q1783.0 -137.0 1812.0 -168.0Q1841.0 -199.0 1841.0 -255.0V-558.0Z';
+const GS_SIRI = 'M42.0 -210.0H224.0Q228.0 -171.0 251.0 -150.5Q274.0 -130.0 311.0 -130.0Q349.0 -130.0 371.0 -147.5Q393.0 -165.0 393.0 -196.0Q393.0 -222.0 375.5 -239.0Q358.0 -256.0 332.5 -267.0Q307.0 -278.0 260.0 -292.0Q192.0 -313.0 149.0 -334.0Q106.0 -355.0 75.0 -396.0Q44.0 -437.0 44.0 -503.0Q44.0 -601.0 115.0 -656.5Q186.0 -712.0 300.0 -712.0Q416.0 -712.0 487.0 -656.5Q558.0 -601.0 563.0 -502.0H378.0Q376.0 -536.0 353.0 -555.5Q330.0 -575.0 294.0 -575.0Q263.0 -575.0 244.0 -558.5Q225.0 -542.0 225.0 -511.0Q225.0 -477.0 257.0 -458.0Q289.0 -439.0 357.0 -417.0Q425.0 -394.0 467.5 -373.0Q510.0 -352.0 541.0 -312.0Q572.0 -272.0 572.0 -209.0Q572.0 -149.0 541.5 -100.0Q511.0 -51.0 453.0 -22.0Q395.0 7.0 316.0 7.0Q239.0 7.0 178.0 -18.0Q117.0 -43.0 80.5 -92.0Q44.0 -141.0 42.0 -210.0Z M861.0 -558.0V0.0H690.0V-558.0Z M1344.0 -564.0V-383.0H1297.0Q1233.0 -383.0 1201.0 -355.5Q1169.0 -328.0 1169.0 -259.0V0.0H998.0V-558.0H1169.0V-465.0Q1199.0 -511.0 1244.0 -537.5Q1289.0 -564.0 1344.0 -564.0Z M1610.0 -558.0V0.0H1439.0V-558.0Z';
+const GS_SIRI_X = 2285.0;
+const GS_DROPS = ["M775.5 -810 C775.5 -810 703.5 -728 703.5 -698 C703.5 -658 735.5 -628 775.5 -628 C815.5 -628 847.5 -658 847.5 -698 C847.5 -728 775.5 -810 775.5 -810Z", "M1524.5 -810 C1524.5 -810 1452.5 -728 1452.5 -698 C1452.5 -658 1484.5 -628 1524.5 -628 C1564.5 -628 1596.5 -658 1596.5 -698 C1596.5 -728 1524.5 -810 1524.5 -810Z"];
+const GS_WM_VIEWBOX = '-40 -940 4050 1000';
+const GS_WM_RATIO = 4.0500;
+
+function GouSiriMark({ size = 64, radius, simple = false, flat = false }) {
+  const uid = (React.useId ? React.useId() : 'gs').replace(/:/g, '');
+  const rx = flat ? 0 : ((radius != null ? radius : size * 0.22) / size) * 512;
+  const star = (cx, cy, r) => {
+    const k = r * 0.28;
+    return <path key={`${cx}-${cy}`} d={`M${cx} ${cy - r} C${cx + k} ${cy - k} ${cx + k} ${cy - k} ${cx + r} ${cy} C${cx + k} ${cy + k} ${cx + k} ${cy + k} ${cx} ${cy + r} C${cx - k} ${cy + k} ${cx - k} ${cy + k} ${cx - r} ${cy} C${cx - k} ${cy - k} ${cx - k} ${cy - k} ${cx} ${cy - r}Z`} fill={`url(#${uid}gd)`} />;
+  };
+  return (
+    <svg width={size} height={size} viewBox="0 0 512 512" aria-hidden="true" style={{ display: 'block', flexShrink: 0 }}>
+      <defs>
+        <linearGradient id={`${uid}bg`} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#74B6FB" /><stop offset="1" stopColor="#2F6FD6" /></linearGradient>
+        <linearGradient id={`${uid}gd`} x1="0.15" y1="0" x2="0.85" y2="1"><stop offset="0" stopColor="#FFE892" /><stop offset="1" stopColor="#F0A21B" /></linearGradient>
+      </defs>
+      <rect width="512" height="512" rx={rx} fill={`url(#${uid}bg)`} />
+      <circle cx="256" cy="262" r="205" fill="#fff" opacity="0.1" />
+      {!simple && [star(104, 118, 24), star(414, 142, 17), star(398, 398, 12)]}
+      <ellipse cx="110" cy="190" rx="54" ry="27" transform="rotate(-22 110 190)" fill="#fff" />
+      <ellipse cx="115" cy="192" rx="31" ry="15" transform="rotate(-22 115 192)" fill="#F7B8B1" />
+      <ellipse cx="402" cy="190" rx="54" ry="27" transform="rotate(22 402 190)" fill="#fff" />
+      <ellipse cx="397" cy="192" rx="31" ry="15" transform="rotate(22 397 192)" fill="#F7B8B1" />
+      <path d="M190 134 C172 98 138 88 112 100 C136 108 154 128 164 160Z" fill="#FFD98A" />
+      <path d="M322 134 C340 98 374 88 400 100 C376 108 358 128 348 160Z" fill="#FFD98A" />
+      <path d="M256 108 C348 108 398 150 398 232 C398 312 352 396 256 396 C160 396 114 312 114 232 C114 150 164 108 256 108Z" fill="#fff" />
+      <ellipse cx="256" cy="330" rx="84" ry="58" fill="#FBD3CE" />
+      <ellipse cx="231" cy="332" rx="9" ry="13" fill="#E58F8A" /><ellipse cx="281" cy="332" rx="9" ry="13" fill="#E58F8A" />
+      <path d="M184 252 Q206 228 228 252" stroke="#17213D" strokeWidth="13" strokeLinecap="round" fill="none" />
+      <path d="M284 252 Q306 228 328 252" stroke="#17213D" strokeWidth="13" strokeLinecap="round" fill="none" />
+      <path d="M256 124 C256 124 228 160 228 182 C228 199 240 211 256 211 C272 211 284 199 284 182 C284 160 256 124 256 124Z" fill={`url(#${uid}gd)`} />
+      <ellipse cx="248" cy="180" rx="6" ry="12" transform="rotate(18 248 180)" fill="#fff" opacity="0.65" />
+      {!simple && <><circle cx="166" cy="296" r="22" fill="#F7B8B1" opacity="0.55" /><circle cx="346" cy="296" r="22" fill="#F7B8B1" opacity="0.55" /></>}
+    </svg>
+  );
+}
+
+// "Gou Siri" lettering (outlined, so it looks identical on every phone). The dots of both i's are golden drops.
+function GouSiriWordmark({ height = 32, color = '#1F4FB0' }) {
+  const uid = (React.useId ? React.useId() : 'gs').replace(/:/g, '');
+  return (
+    <svg height={height} width={Math.round(height * GS_WM_RATIO)} viewBox={GS_WM_VIEWBOX} role="img" aria-label="Gou Siri" style={{ display: 'block' }}>
+      <defs>
+        <linearGradient id={`${uid}gd`} x1="0.15" y1="0" x2="0.85" y2="1"><stop offset="0" stopColor="#FFE892" /><stop offset="1" stopColor="#F0A21B" /></linearGradient>
+      </defs>
+      <path d={GS_GOU} fill={color} />
+      <path d={GS_SIRI} transform={`translate(${GS_SIRI_X} 0)`} fill={color} />
+      {GS_DROPS.map((d, i) => <path key={i} d={d} transform={`translate(${GS_SIRI_X} 0)`} fill={`url(#${uid}gd)`} />)}
+    </svg>
+  );
+}
+
+function SplashScreen({ text }) {
+  return (
+    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 18, background: C.bg }}>
+      {FONTS}
+      <div className="gs-pulse" style={{ borderRadius: 30, boxShadow: `0 16px 34px rgba(${C.brandRgb},0.35)` }}>
+        <GouSiriMark size={104} radius={30} />
+      </div>
+      <GouSiriWordmark height={30} />
+      <div className="ff-body" style={{ color: C.sub, fontSize: 14.5, marginTop: 4 }}>{text}</div>
     </div>
   );
 }
@@ -1064,11 +1138,14 @@ function AuthScreen() {
     <div style={{ minHeight: '100vh', display: 'flex', justifyContent: 'center', background: '#fff' }}>
       {FONTS}
       <div className="ff-body" style={{ width: '100%', maxWidth: 420, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ borderRadius: '0 0 34px 34px', overflow: 'hidden', marginBottom: 24 }}><PastureScene height={200} /></div>
+        <div style={{ borderRadius: '0 0 34px 34px', overflow: 'hidden', marginBottom: 0 }}><PastureScene height={200} /></div>
         <div style={{ padding: '0 24px 28px' }}>
-        <div style={{ marginBottom: 24 }}>
-          <div className="ff-display" style={{ fontSize: 30, color: C.ink, lineHeight: 1.15 }}>Dairy Farm Manager</div>
-          <div style={{ fontSize: 16, color: C.sub, marginTop: 6 }}>{mode === 'login' ? 'Log in to your farm' : 'Create your account'}</div>
+        <div style={{ marginTop: -52, marginBottom: 22 }}>
+          <div style={{ width: 84, height: 84, borderRadius: 26, boxShadow: '0 0 0 5px #fff, 0 14px 28px rgba(47,111,214,0.32)', marginBottom: 14 }}>
+            <GouSiriMark size={84} radius={26} />
+          </div>
+          <GouSiriWordmark height={34} />
+          <div style={{ fontSize: 15.5, color: C.sub, marginTop: 8 }}>Dairy farm manager · {mode === 'login' ? 'Log in to your farm' : 'Create your account'}</div>
         </div>
 
         <Field label="Email">
@@ -1105,6 +1182,7 @@ function AuthScreen() {
 }
 
 export default function App() {
+  useEffect(() => { document.title = 'Gou Siri – Dairy Farm Manager'; }, []);
   const [loaded, setLoaded] = useState(false);
   const [cows, setCows] = useState([]);
   const [milk, setMilk] = useState([]);
@@ -1359,10 +1437,7 @@ export default function App() {
 
   if (session === undefined) {
     return (
-      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.bg }}>
-        {FONTS}
-        <div className="ff-body" style={{ color: C.sub, fontSize: 14 }}>Loading…</div>
-      </div>
+      <SplashScreen text="Loading…" />
     );
   }
 
@@ -1372,10 +1447,7 @@ export default function App() {
 
   if (!loaded) {
     return (
-      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.bg }}>
-        {FONTS}
-        <div className="ff-body" style={{ color: C.sub, fontSize: 14 }}>Loading your farm…</div>
-      </div>
+      <SplashScreen text="Loading your farm…" />
     );
   }
 
@@ -2198,7 +2270,8 @@ function HomeScreen({ cows, milkToday, heatAlerts, medDue, insemAlerts, insuranc
   return (
     <div style={{ paddingBottom: 24 }}>
       <ScreenHeader
-        title={farmName || 'My Farm'} subtitle={`${greeting} 👋`}
+        leading={<div style={{ borderRadius: 12, boxShadow: '0 0 0 2px rgba(255,255,255,0.85)', flexShrink: 0 }}><GouSiriMark size={38} radius={11} simple /></div>}
+        title={farmName || 'My Farm'} titleSize={21} subtitle={`${greeting} 👋`}
         right={
           <div style={{ display: 'flex', gap: 6 }}>
             <HeaderIconButton title="Backup all data" icon={<Download size={17} color="#fff" />} onClick={onBackup} />
