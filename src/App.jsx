@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useContext } from 'react';
 import {
   Home, Milk, HeartPulse, Stethoscope, Plus, ArrowLeft, X,
   Calendar, Search, Check, ChevronRight, ChevronLeft, Trash2, Pencil, Droplet, Syringe, Printer, Download, Wheat, Baby, PackageMinus, PackagePlus, Upload, LogOut, Mail, Lock, Users, UserPlus, Eye, KeyRound, UserCircle, Wallet, TrendingUp, TrendingDown,
-  Sparkles, Send, Mic
+  Sparkles, Send, Mic, Minus
 } from 'lucide-react';
 import ReactDOM from 'react-dom';
 import { supabase, configMissing } from './supabaseClient.js';
@@ -1374,6 +1374,11 @@ export default function App() {
     setHeat(heat.filter((h) => h.id !== record.id));
   };
 
+  const deleteFeedType = async (id) => {
+    await supabase.from('feed_types').delete().eq('id', id);
+    setFeedTypes((prev) => prev.filter((f) => f.id !== id));
+    setFeedTransactions((prev) => prev.filter((t) => t.feedTypeId !== id));
+  };
   const onEditMedical = (record) => setModal({ type: 'medical', cowId: record.cowId, editId: record.id });
   const onDeleteMedical = async (record) => {
     await supabase.from('medical_records').delete().eq('id', record.id);
@@ -1615,15 +1620,16 @@ export default function App() {
                   feedTypes={feedTypes} feedTransactions={feedTransactions}
                   onAddType={() => setModal({ type: 'feedType' })}
                   onEditType={(id) => setModal({ type: 'feedType', editId: id })}
-                  onDeleteType={async (id) => {
-                    await supabase.from('feed_types').delete().eq('id', id);
-                    setFeedTypes(feedTypes.filter((f) => f.id !== id));
-                    setFeedTransactions(feedTransactions.filter((t) => t.feedTypeId !== id));
-                  }}
                   onLogTxn={(feedTypeId, kind) => setModal({ type: 'feedTxn', feedTypeId, kind })}
+                  onQuickTxn={async (feedTypeId, kind, data) => {
+                    const { data: row, error } = await supabase.from('feed_transactions').insert(feedTxnToRow({ ...data, feedTypeId, kind }, userId)).select().single();
+                    if (error || !row) throw new Error(error ? error.message : 'Could not save');
+                    setFeedTransactions((prev) => [...prev, mapFeedTxnFromRow(row)]);
+                  }}
                   onUpdateTxn={async (id, data) => {
                     const patch = {};
                     if (data.bags != null) patch.bags = data.bags;
+                    if (data.date) patch.date = data.date;
                     if ('cost' in data) patch.cost = data.cost;
                     const { data: row, error } = await supabase.from('feed_transactions').update(patch).eq('id', id).select().single();
                     if (!error && row) setFeedTransactions(feedTransactions.map((t) => (t.id === id ? mapFeedTxnFromRow(row) : t)));
@@ -1799,14 +1805,24 @@ export default function App() {
           {modal && modal.type === 'feedType' && (
             <FeedTypeForm
               initial={modal.editId ? feedTypes.find((f) => f.id === modal.editId) : null}
+              txnCount={modal.editId ? feedTransactions.filter((t) => t.feedTypeId === modal.editId).length : 0}
               onClose={() => setModal(null)}
-              onSave={async (data) => {
+              onDelete={modal.editId ? async () => { await deleteFeedType(modal.editId); setModal(null); } : null}
+              onSave={async ({ openingBags, ...typeData }) => {
                 if (modal.editId) {
-                  await supabase.from('feed_types').update(feedTypeToRow(data, userId)).eq('id', modal.editId);
-                  setFeedTypes(feedTypes.map((f) => (f.id === modal.editId ? { ...f, ...data } : f)));
+                  await supabase.from('feed_types').update(feedTypeToRow(typeData, userId)).eq('id', modal.editId);
+                  setFeedTypes((prev) => prev.map((f) => (f.id === modal.editId ? { ...f, ...typeData } : f)));
                 } else {
-                  const { data: row, error } = await supabase.from('feed_types').insert(feedTypeToRow(data, userId)).select().single();
-                  if (!error) setFeedTypes([...feedTypes, mapFeedTypeFromRow(row)]);
+                  const { data: row, error } = await supabase.from('feed_types').insert(feedTypeToRow(typeData, userId)).select().single();
+                  if (!error && row) {
+                    setFeedTypes((prev) => [...prev, mapFeedTypeFromRow(row)]);
+                    if (openingBags > 0) {
+                      // the stock you already have becomes the first entry, so the count starts right
+                      const { data: trow } = await supabase.from('feed_transactions')
+                        .insert(feedTxnToRow({ feedTypeId: row.id, date: todayStr(), kind: 'purchase', bags: openingBags, cost: 0, notes: OPENING_STOCK_NOTE }, userId)).select().single();
+                      if (trow) setFeedTransactions((prev) => [...prev, mapFeedTxnFromRow(trow)]);
+                    }
+                  }
                 }
                 setModal(null);
               }}
@@ -1820,7 +1836,7 @@ export default function App() {
               onClose={() => setModal(null)}
               onSave={async (data) => {
                 const { data: row, error } = await supabase.from('feed_transactions').insert(feedTxnToRow({ ...data, feedTypeId: modal.feedTypeId, kind: modal.kind }, userId)).select().single();
-                if (!error) setFeedTransactions([...feedTransactions, mapFeedTxnFromRow(row)]);
+                if (!error && row) setFeedTransactions((prev) => [...prev, mapFeedTxnFromRow(row)]);
                 setModal(null);
               }}
             />
@@ -4280,21 +4296,147 @@ function MedicalForm({ cows, defaultCowId, initial, onClose, onSave }) {
 }
 
 // ================= FEED MANAGEMENT =================
-function FeedScreen({ feedTypes, feedTransactions, onAddType, onEditType, onDeleteType, onLogTxn, onUpdateTxn, onDeleteTxn, onExport }) {
+// ================= FEED =================
+// Plain-language feed tracking: how many bags are left, how many days they will last, and a quick daily log.
+const STOCK_FIX_NOTE = 'Stock correction';
+const OPENING_STOCK_NOTE = 'Opening stock';
+const fmtBags = (n) => {
+  const r = Math.round(Number(n || 0) * 10) / 10;
+  return Number.isInteger(r) ? String(r) : r.toFixed(1);
+};
+const daysBetween = (a, b) => Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 86400000);
+
+// Average bags used per day, from the last 14 days of entries (stock corrections are ignored).
+// Counted from the first to the LAST day that has an entry, so a day you haven't logged yet doesn't drag the average down.
+function feedUsageRate(feedTypeId, txns) {
+  const today = todayStr();
+  const since = addDays(today, -13);
+  const recent = txns.filter((t) => t.feedTypeId === feedTypeId && t.kind === 'usage' && t.notes !== STOCK_FIX_NOTE && t.date >= since && t.date <= today);
+  if (!recent.length) return 0;
+  const first = recent.reduce((m, t) => (t.date < m ? t.date : m), recent[0].date);
+  const last = recent.reduce((m, t) => (t.date > m ? t.date : m), recent[0].date);
+  const span = Math.max(1, daysBetween(first, last) + 1);
+  return recent.reduce((sum, t) => sum + Number(t.bags), 0) / span;
+}
+// Date of the most recent daily-use entry for a feed (or '')
+function feedLastUsed(feedTypeId, txns) {
+  return txns.filter((t) => t.feedTypeId === feedTypeId && t.kind === 'usage' && t.notes !== STOCK_FIX_NOTE).reduce((m, t) => (t.date > m ? t.date : m), '');
+}
+function feedStatus(stock, perDay) {
+  if (stock <= 0) return { level: 'out', days: 0, tone: 'rust', label: 'Out of stock' };
+  if (!(perDay > 0)) return { level: 'unknown', days: null, tone: 'grey', label: 'Not enough data yet' };
+  const days = stock / perDay;
+  const text = days < 1 ? 'less than a day' : days < 2 ? 'about 1 day' : `about ${Math.floor(days)} days`;
+  if (days < 3) return { level: 'urgent', days, tone: 'rust', label: `${text} left — buy now` };
+  if (days < 7) return { level: 'soon', days, tone: 'amber', label: `${text} left — buy soon` };
+  return { level: 'ok', days, tone: 'green', label: `${text} left` };
+}
+function feedLoggedOn(feedTypeId, txns, date) {
+  return txns.filter((t) => t.feedTypeId === feedTypeId && t.kind === 'usage' && t.date === date && t.notes !== STOCK_FIX_NOTE).reduce((s, t) => s + Number(t.bags), 0);
+}
+const dayHeading = (date) => (date === todayStr() ? 'Today' : date === addDays(todayStr(), -1) ? 'Yesterday' : fmtDate(date));
+const FEED_TONES = {
+  green: { bg: C.greenSoft, fg: C.green, bar: C.green },
+  amber: { bg: C.amberSoft, fg: C.amber, bar: '#F2B544' },
+  rust: { bg: C.rustSoft, fg: C.rust, bar: C.rust },
+  grey: { bg: C.greySoft, fg: C.sub, bar: '#C9CBD3' },
+};
+
+function BagStepper({ value, onChange, disabled }) {
+  const n = Number(value || 0);
+  const step = (d) => onChange(String(Math.max(0, Math.round((n + d) * 2) / 2)));
+  const btn = { width: 38, height: 40, border: 'none', background: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.brand };
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', border: `1.5px solid ${C.line}`, borderRadius: 12, background: '#fff', flexShrink: 0 }}>
+      <button onClick={() => step(-0.5)} disabled={disabled} aria-label="Less" style={btn}><Minus size={17} strokeWidth={2.6} /></button>
+      <input
+        value={value} inputMode="decimal" placeholder="0" aria-label="Bags"
+        onChange={(e) => { const v = e.target.value.replace(',', '.'); if (/^\d*\.?\d{0,1}$/.test(v)) onChange(v); }}
+        style={{ width: 46, textAlign: 'center', border: 'none', outline: 'none', fontSize: 17, fontWeight: 700, color: C.ink, background: 'transparent', fontFamily: 'inherit' }}
+      />
+      <button onClick={() => step(0.5)} disabled={disabled} aria-label="More" style={btn}><Plus size={17} strokeWidth={2.6} /></button>
+    </div>
+  );
+}
+
+function FeedScreen({ feedTypes, feedTransactions, onAddType, onEditType, onLogTxn, onQuickTxn, onUpdateTxn, onDeleteTxn, onExport }) {
   const { isReadOnly } = useContext(RoleContext);
   const [viewingTxn, setViewingTxn] = useState(null);
+  const [fixing, setFixing] = useState(null);
+  const [openDetails, setOpenDetails] = useState({});
+  const [logDay, setLogDay] = useState('today'); // 'today' | 'yesterday'
+  const [qty, setQty] = useState({});
+  const [saving, setSaving] = useState({});
+  const [error, setError] = useState('');
+  const [historyFilter, setHistoryFilter] = useState('all');
+  const [historyCount, setHistoryCount] = useState(12);
+
+  const today = todayStr();
+  const logDate = logDay === 'today' ? today : addDays(today, -1);
   const month = currentMonthStr();
-  const totalSpendThisMonth = feedTypes.reduce((s, f) => s + feedMonthSpend(f.id, feedTransactions, month), 0);
-  const totalPurchased = feedTypes.reduce((s, f) => s + feedTotalPurchased(f.id, feedTransactions), 0);
-  const totalUsed = feedTypes.reduce((s, f) => s + feedTotalUsed(f.id, feedTransactions), 0);
-  const totalDebited = feedTypes.reduce((s, f) => s + feedTotalDebited(f.id, feedTransactions), 0);
-  const totalSaved = feedTypes.reduce((s, f) => s + feedStockValue(f, feedTransactions), 0);
-  const recent = feedTransactions.slice().sort((a, b) => b.date.localeCompare(a.date)).slice(0, 8);
+
+  const infos = feedTypes.map((f) => {
+    const stock = feedStock(f.id, feedTransactions);
+    const rate = feedUsageRate(f.id, feedTransactions);
+    return { f, stock, rate, st: feedStatus(stock, rate) };
+  });
+  const needs = infos.filter((i) => ['out', 'urgent', 'soon'].includes(i.st.level)).sort((a, b) => (a.st.days ?? 0) - (b.st.days ?? 0));
+  const anyData = infos.some((i) => i.st.level !== 'unknown');
+  const urgent = needs.some((i) => i.st.level === 'out' || i.st.level === 'urgent');
+
+  const usedMonthBags = feedTransactions.filter((t) => t.kind === 'usage' && t.date.slice(0, 7) === month).reduce((s, t) => s + Number(t.bags), 0);
+  const usedMonthCost = feedTransactions.filter((t) => t.kind === 'usage' && t.date.slice(0, 7) === month).reduce((s, t) => {
+    const ft = feedTypes.find((x) => x.id === t.feedTypeId);
+    return s + (ft ? Number(t.bags) * Number(ft.costPerBag || 0) : 0);
+  }, 0);
+  const boughtMonthCost = feedTypes.reduce((s, f) => s + feedMonthSpend(f.id, feedTransactions, month), 0);
+
+  const history = feedTransactions
+    .filter((t) => historyFilter === 'all' || t.feedTypeId === historyFilter)
+    .slice().sort((a, b) => b.date.localeCompare(a.date));
+  const shownHistory = history.slice(0, historyCount);
+  const groups = [];
+  shownHistory.forEach((t) => {
+    const last = groups[groups.length - 1];
+    if (last && last.date === t.date) last.items.push(t); else groups.push({ date: t.date, items: [t] });
+  });
+
+  const logUsage = async (f, amount) => {
+    const n = Number(amount);
+    if (!(n > 0) || saving[f.id]) return;
+    setSaving((s) => ({ ...s, [f.id]: true }));
+    setError('');
+    try {
+      await onQuickTxn(f.id, 'usage', { date: logDate, bags: n });
+      setQty((q) => { const c = { ...q }; delete c[f.id]; return c; });
+    } catch (e) {
+      setError("Couldn't save — please check your connection and try again.");
+    } finally {
+      setSaving((s) => ({ ...s, [f.id]: false }));
+    }
+  };
+
+  const describe = (t) => {
+    const f = feedTypes.find((x) => x.id === t.feedTypeId);
+    const name = f ? f.name : 'Feed';
+    if (t.notes === STOCK_FIX_NOTE) return `Stock corrected: ${fmtBags(t.bags)} ${t.kind === 'usage' ? 'fewer' : 'more'} bags · ${name}`;
+    if (t.notes === OPENING_STOCK_NOTE) return `Starting stock ${fmtBags(t.bags)} bags · ${name}`;
+    return `${t.kind === 'purchase' ? 'Bought' : 'Used'} ${fmtBags(t.bags)} bags · ${name}`;
+  };
+
+  const banner = needs.length > 0
+    ? {
+      tone: urgent ? 'rust' : 'amber', icon: urgent ? '⚠️' : '🛒', title: urgent ? 'Buy feed now' : 'Buy feed soon',
+      detail: needs.slice(0, 3).map((i) => `${i.f.name} — ${i.st.level === 'out' ? 'out of stock' : i.st.label.replace(' — buy now', '').replace(' — buy soon', '')}`).join(' · '),
+    }
+    : anyData
+      ? { tone: 'green', icon: '✅', title: 'Feed stock looks fine', detail: 'Everything you have lasts a week or more.' }
+      : { tone: 'grey', icon: '📝', title: 'Log your daily feed', detail: "After a few days I'll tell you how long each feed will last." };
 
   return (
-    <div>
+    <div style={{ paddingBottom: 110 }}>
       <ScreenHeader
-        title="Feed Management" subtitle={monthLabel(month)}
+        title="Feed" subtitle="Stock, daily use and spending"
         right={
           <div style={{ display: 'flex', gap: 6 }}>
             <HeaderIconButton title="Print feed records" icon={<Printer size={15} color="#fff" />} onClick={() => onExport('print')} />
@@ -4303,123 +4445,198 @@ function FeedScreen({ feedTypes, feedTransactions, onAddType, onEditType, onDele
         }
       />
       <div style={{ padding: 16 }}>
-        {feedTypes.length > 0 && (
-          <>
-            <SectionTitle title="Overall (all time)" />
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 18 }}>
-              <StatCard label="Bags purchased" value={totalPurchased} bg={C.greenSoft} fg={C.green} icon={<PackagePlus size={16} />} />
-              <StatCard label="Bags used" value={totalUsed} bg={C.greySoft} fg={C.grey} icon={<PackageMinus size={16} />} />
-              <StatCard label="Amount debited" value={`₹${totalDebited.toFixed(0)}`} bg={C.rustSoft} fg={C.rust} icon={<Download size={16} />} />
-              <StatCard label="Stock value (saved)" value={`₹${totalSaved.toFixed(0)}`} bg={C.milkSoft} fg={C.milk} icon={<Wheat size={16} />} />
-            </div>
-            <div style={{ background: C.brownSoft, borderRadius: 14, padding: 14, marginBottom: 18, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div>
-                <div className="ff-body" style={{ fontSize: 13, color: C.brown, fontWeight: 600 }}>Feed spend this month</div>
-                <div className="ff-display" style={{ fontSize: 26, fontWeight: 700, color: C.brown }}>₹{totalSpendThisMonth.toFixed(0)}</div>
-              </div>
-              <Wheat size={26} color={C.brown} />
-            </div>
-          </>
-        )}
-
-        <SectionTitle title="Feed types" />
         {feedTypes.length === 0 ? (
-          <EmptyState icon={<Wheat size={30} />} title="No feed types yet" subtitle="Add each type of feed you use — for example, dry fodder, concentrate, and mineral mix — to start tracking stock and spend." />
+          <div style={{ background: '#fff', borderRadius: 20, padding: 20, boxShadow: C.shadow }}>
+            <div style={{ textAlign: 'center', marginBottom: 14 }}>
+              <div style={{ width: 72, height: 72, borderRadius: 36, background: C.brandSoft, color: C.brand, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}><Wheat size={32} /></div>
+              <div className="ff-display" style={{ fontSize: 19, color: C.ink }}>Set up your feed in 3 steps</div>
+            </div>
+            {[['1', 'Add each feed you use', 'e.g. Concentrate, Dry fodder — with the price of one bag.'], ['2', 'Enter the stock you have now', 'So the app starts with the right number.'], ['3', 'Log how much you feed each day', "One tap per feed. I'll tell you when to buy more."]].map(([n, t, d]) => (
+              <div key={n} style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+                <div className="ff-display" style={{ width: 28, height: 28, borderRadius: 14, background: C.brand, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0 }}>{n}</div>
+                <div><div className="ff-body" style={{ fontWeight: 700, fontSize: 15, color: C.ink }}>{t}</div><div className="ff-body" style={{ fontSize: 13.5, color: C.sub }}>{d}</div></div>
+              </div>
+            ))}
+            {!isReadOnly && <PrimaryButton onClick={onAddType}>Add your first feed</PrimaryButton>}
+          </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 18 }}>
-            {feedTypes.map((f) => {
-              const stock = feedStock(f.id, feedTransactions);
-              const boughtThisMonth = feedMonthPurchased(f.id, feedTransactions, month);
-              const spendThisMonth = feedMonthSpend(f.id, feedTransactions, month);
-              const purchasedAll = feedTotalPurchased(f.id, feedTransactions);
-              const usedAll = feedTotalUsed(f.id, feedTransactions);
-              const debitedAll = feedTotalDebited(f.id, feedTransactions);
-              const savedAll = feedStockValue(f, feedTransactions);
-              const low = stock <= 3;
-              return (
-                <div key={f.id} style={{ background: '#fff', border: `1px solid ${C.line}`, borderRadius: 14, padding: 14 }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-                    <div>
-                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 15.5, color: C.ink }}>{f.name}</div>
-                      <div style={{ fontSize: 13, color: C.sub, marginTop: 1 }}>₹{f.costPerBag} / bag</div>
+          <>
+            {/* 1. Do I have enough? */}
+            <div style={{ background: FEED_TONES[banner.tone].bg, borderRadius: 18, padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+              <div style={{ fontSize: 26, lineHeight: 1 }}>{banner.icon}</div>
+              <div style={{ minWidth: 0 }}>
+                <div className="ff-display" style={{ fontSize: 17, color: FEED_TONES[banner.tone].fg }}>{banner.title}</div>
+                <div className="ff-body" style={{ fontSize: 13.5, color: FEED_TONES[banner.tone].fg, opacity: 0.9, marginTop: 2, lineHeight: 1.4 }}>{banner.detail}</div>
+              </div>
+            </div>
+
+            {/* 2. What do I log today? */}
+            {!isReadOnly && (
+              <div style={{ background: '#fff', borderRadius: 20, padding: '14px 16px', boxShadow: C.shadow, marginBottom: 18 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 6 }}>
+                  <div className="ff-display" style={{ fontSize: 17, color: C.ink }}>Log feed used</div>
+                  <Segmented options={['today', 'yesterday']} value={logDay} onChange={setLogDay} labels={{ today: 'Today', yesterday: 'Yesterday' }} />
+                </div>
+                {infos.map(({ f, rate }, i) => {
+                  const logged = feedLoggedOn(f.id, feedTransactions, logDate);
+                  const usual = rate > 0 ? Math.max(0.5, Math.round(rate * 2) / 2) : null;
+                  const value = qty[f.id] ?? (usual != null ? String(usual) : '');
+                  const lastUsed = feedLastUsed(f.id, feedTransactions);
+                  const quietDays = lastUsed ? daysBetween(lastUsed, today) : 0;
+                  return (
+                    <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderTop: i ? `1px solid ${C.line}` : 'none' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div className="ff-display" style={{ fontSize: 15.5, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</div>
+                        <div className="ff-body" style={{ fontSize: 12.5, fontWeight: logged > 0 || quietDays >= 2 ? 700 : 500, color: logged > 0 ? C.green : quietDays >= 2 ? C.amber : C.sub }}>
+                          {logged > 0
+                            ? `✓ ${fmtBags(logged)} bags logged`
+                            : quietDays >= 2 && logDay === 'today'
+                              ? `Last logged ${quietDays} days ago`
+                              : usual != null ? `Usual: ${fmtBags(usual)} bags a day` : 'Nothing logged yet'}
+                        </div>
+                      </div>
+                      <BagStepper value={value} onChange={(v) => setQty((q) => ({ ...q, [f.id]: v }))} disabled={saving[f.id]} />
+                      <button
+                        onClick={() => logUsage(f, value)} disabled={saving[f.id] || !(Number(value) > 0)}
+                        className="ff-body"
+                        style={{ background: C.brand, color: '#fff', border: 'none', borderRadius: 12, padding: '0 14px', height: 42, fontSize: 15, fontWeight: 700, opacity: saving[f.id] || !(Number(value) > 0) ? 0.45 : 1, flexShrink: 0 }}
+                      >
+                        {saving[f.id] ? '…' : logged > 0 ? 'Add' : 'Log'}
+                      </button>
                     </div>
-                    <div style={{ display: 'flex', gap: 6 }}>
+                  );
+                })}
+                {error && <div className="ff-body" style={{ background: C.rustSoft, color: C.rust, borderRadius: 10, padding: '8px 10px', fontSize: 13, marginTop: 8 }}>{error}</div>}
+              </div>
+            )}
+
+            {/* 3. Stock of each feed */}
+            <SectionTitle title="Your stock" />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 20 }}>
+              {infos.map(({ f, stock, rate, st }) => {
+                const tone = FEED_TONES[st.tone];
+                const pct = st.days == null ? 0 : Math.min(100, Math.max(5, (st.days / 14) * 100));
+                const boughtBags = feedMonthPurchased(f.id, feedTransactions, month);
+                const boughtCost = feedMonthSpend(f.id, feedTransactions, month);
+                const usedBags = feedTransactions.filter((t) => t.feedTypeId === f.id && t.kind === 'usage' && t.date.slice(0, 7) === month).reduce((s, t) => s + Number(t.bags), 0);
+                return (
+                  <div key={f.id} style={{ background: '#fff', borderRadius: 20, padding: 16, boxShadow: C.shadow }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div className="ff-display" style={{ fontSize: 17, color: C.ink }}>{f.name}</div>
+                        <div className="ff-body" style={{ fontSize: 13, color: C.sub }}>₹{f.costPerBag} per bag</div>
+                      </div>
                       {!isReadOnly && (
-                        <>
-                          <button onClick={() => onEditType(f.id)} style={{ background: C.greySoft, border: 'none', borderRadius: 8, padding: 5 }}><Pencil size={13} color={C.ink} /></button>
-                          <button onClick={() => onDeleteType(f.id)} style={{ background: C.greySoft, border: 'none', borderRadius: 8, padding: 5 }}><Trash2 size={13} color={C.ink} /></button>
-                        </>
+                        <button onClick={() => onEditType(f.id)} aria-label={`Edit ${f.name}`} style={{ background: C.greySoft, border: 'none', borderRadius: 10, padding: 8, display: 'flex' }}><Pencil size={15} color={C.ink} /></button>
                       )}
                     </div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, margin: '10px 0 8px', flexWrap: 'wrap' }}>
+                      <span className="ff-display" style={{ fontSize: 32, lineHeight: 1, color: stock <= 0 ? C.rust : C.ink }}>{fmtBags(stock)}</span>
+                      <span className="ff-body" style={{ fontSize: 15, color: C.sub, fontWeight: 600 }}>bags left</span>
+                      <span className="ff-body" style={{ marginLeft: 'auto', background: tone.bg, color: tone.fg, borderRadius: 8, padding: '4px 10px', fontSize: 13, fontWeight: 700 }}>{st.label}</span>
+                    </div>
+                    {st.days != null && (
+                      <div style={{ height: 8, borderRadius: 4, background: C.greySoft, overflow: 'hidden', marginBottom: 8 }}>
+                        <div style={{ width: `${pct}%`, height: '100%', background: tone.bar, borderRadius: 4 }} />
+                      </div>
+                    )}
+                    <div className="ff-body" style={{ fontSize: 13.5, color: C.sub, lineHeight: 1.4 }}>
+                      {stock < 0
+                        ? 'The app thinks more was used than bought — tap “Fix stock” to match what you really have.'
+                        : rate > 0 ? `You use about ${fmtBags(rate)} bags a day.` : 'Log the feed you use each day, and I’ll work out how long this lasts.'}
+                    </div>
+                    {!isReadOnly && (
+                      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                        <button onClick={() => onLogTxn(f.id, 'purchase')} className="ff-body" style={{ flex: 1.4, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.brandSoft, color: C.brand, border: 'none', borderRadius: 12, padding: '12px 0', fontSize: 15, fontWeight: 700 }}>
+                          <PackagePlus size={16} /> Add stock
+                        </button>
+                        <button onClick={() => setFixing(f)} className="ff-body" style={{ flex: 1, background: stock < 0 ? C.amberSoft : C.greySoft, color: stock < 0 ? C.amber : C.ink, border: 'none', borderRadius: 12, padding: '12px 0', fontSize: 15, fontWeight: 700 }}>
+                          Fix stock
+                        </button>
+                      </div>
+                    )}
+                    <button onClick={() => setOpenDetails((o) => ({ ...o, [f.id]: !o[f.id] }))} className="ff-body" style={{ background: 'none', border: 'none', color: C.sub, fontSize: 13.5, fontWeight: 600, padding: '10px 0 0', display: 'flex', alignItems: 'center', gap: 4 }}>
+                      {openDetails[f.id] ? 'Hide details' : 'More details'}
+                    </button>
+                    {openDetails[f.id] && (
+                      <div className="ff-body" style={{ marginTop: 6, borderTop: `1px solid ${C.line}`, paddingTop: 10, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 14px' }}>
+                        {[
+                          ['Bought this month', `${fmtBags(boughtBags)} bags${boughtCost ? ` · ₹${boughtCost.toFixed(0)}` : ''}`],
+                          ['Used this month', `${fmtBags(usedBags)} bags · ₹${(usedBags * Number(f.costPerBag || 0)).toFixed(0)}`],
+                          ['Bought, all time', `${fmtBags(feedTotalPurchased(f.id, feedTransactions))} bags`],
+                          ['Used, all time', `${fmtBags(feedTotalUsed(f.id, feedTransactions))} bags`],
+                          ['Value of stock in hand', `₹${feedStockValue(f, feedTransactions).toFixed(0)}`],
+                        ].map(([k, v]) => (
+                          <div key={k}><div style={{ fontSize: 12, color: C.sub }}>{k}</div><div style={{ fontSize: 14.5, fontWeight: 700, color: C.ink }}>{v}</div></div>
+                        ))}
+                      </div>
+                    )}
                   </div>
+                );
+              })}
+            </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 12 }}>
-                    <div>
-                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 19, color: low ? C.rust : C.ink }}>{stock}</div>
-                      <div style={{ fontSize: 12, color: C.sub }}>Bags left</div>
-                    </div>
-                    <div>
-                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 19, color: C.ink }}>{purchasedAll}</div>
-                      <div style={{ fontSize: 12, color: C.sub }}>Purchased (total)</div>
-                    </div>
-                    <div>
-                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 19, color: C.ink }}>{usedAll}</div>
-                      <div style={{ fontSize: 12, color: C.sub }}>Used (total)</div>
-                    </div>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, margin: '10px 0 12px' }}>
-                    <div>
-                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 16, color: C.ink }}>{boughtThisMonth}</div>
-                      <div style={{ fontSize: 12, color: C.sub }}>Bought this mo.</div>
-                    </div>
-                    <div>
-                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 16, color: C.rust }}>₹{debitedAll.toFixed(0)}</div>
-                      <div style={{ fontSize: 12, color: C.sub }}>Debited (total)</div>
-                    </div>
-                    <div>
-                      <div className="ff-display" style={{ fontWeight: 700, fontSize: 16, color: C.milk }}>₹{savedAll.toFixed(0)}</div>
-                      <div style={{ fontSize: 12, color: C.sub }}>Stock value</div>
-                    </div>
-                  </div>
+            {/* 4. What am I spending? */}
+            <SectionTitle title={`This month · ${monthLabel(month)}`} />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 8 }}>
+              <div style={{ background: '#fff', borderRadius: 18, padding: 14, boxShadow: C.shadow }}>
+                <div className="ff-body" style={{ fontSize: 13, color: C.sub, fontWeight: 600 }}>Feed used</div>
+                <div className="ff-display" style={{ fontSize: 24, color: C.ink, marginTop: 4 }}>₹{usedMonthCost.toFixed(0)}</div>
+                <div className="ff-body" style={{ fontSize: 12.5, color: C.sub, marginTop: 2 }}>{fmtBags(usedMonthBags)} bags</div>
+              </div>
+              <div style={{ background: '#fff', borderRadius: 18, padding: 14, boxShadow: C.shadow }}>
+                <div className="ff-body" style={{ fontSize: 13, color: C.sub, fontWeight: 600 }}>Spent on buying</div>
+                <div className="ff-display" style={{ fontSize: 24, color: C.ink, marginTop: 4 }}>₹{boughtMonthCost.toFixed(0)}</div>
+                <div className="ff-body" style={{ fontSize: 12.5, color: C.sub, marginTop: 2 }}>stock purchased</div>
+              </div>
+            </div>
+            <div className="ff-body" style={{ fontSize: 12.5, color: C.sub, marginBottom: 20, lineHeight: 1.4 }}>
+              “Feed used” (bags used × price per bag) is what the Finance tab counts as your feed expense.
+            </div>
 
-                  {low && <div style={{ marginBottom: 10 }}><Chip bg={C.rustSoft} fg={C.rust}>Running low — consider restocking</Chip></div>}
-                  {!isReadOnly && (
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button onClick={() => onLogTxn(f.id, 'purchase')} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, background: C.greenSoft, color: C.green, border: 'none', borderRadius: 9, padding: '8px 0', fontSize: 13, fontWeight: 700 }}>
-                        <PackagePlus size={13} /> Log purchase
-                      </button>
-                      <button onClick={() => onLogTxn(f.id, 'usage')} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, background: C.greySoft, color: C.ink, border: 'none', borderRadius: 9, padding: '8px 0', fontSize: 13, fontWeight: 700 }}>
-                        <PackageMinus size={13} /> Log usage
-                      </button>
+            {/* 5. History */}
+            <SectionTitle title="History" />
+            {feedTypes.length > 1 && (
+              <div style={{ display: 'flex', gap: 8, overflowX: 'auto', margin: '0 -16px 12px', padding: '0 16px' }}>
+                {[{ id: 'all', name: 'All' }, ...feedTypes].map((f) => (
+                  <button
+                    key={f.id} onClick={() => { setHistoryFilter(f.id); setHistoryCount(12); }} className="ff-body"
+                    style={{ flexShrink: 0, border: `1.5px solid ${historyFilter === f.id ? C.brand : C.line}`, background: historyFilter === f.id ? C.brandSoft : '#fff', color: historyFilter === f.id ? C.brand : C.ink, borderRadius: 12, padding: '7px 14px', fontSize: 14, fontWeight: 600 }}
+                  >
+                    {f.name}
+                  </button>
+                ))}
+              </div>
+            )}
+            {history.length === 0 ? (
+              <MutedNote text="Nothing logged yet. Your feed purchases and daily use will show up here." />
+            ) : (
+              <>
+                {groups.map((g) => (
+                  <div key={g.date} style={{ marginBottom: 12 }}>
+                    <div className="ff-body" style={{ fontSize: 13, fontWeight: 700, color: C.sub, margin: '0 2px 6px' }}>{dayHeading(g.date)}</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {g.items.map((t) => (
+                        <div key={t.id} onClick={() => setViewingTxn(t)} style={{ ...rowCardStyle, padding: '12px 14px' }}>
+                          <div style={{ width: 34, height: 34, borderRadius: 17, background: t.kind === 'purchase' ? C.greenSoft : C.greySoft, color: t.kind === 'purchase' ? C.green : C.sub, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                            {t.kind === 'purchase' ? <PackagePlus size={17} /> : <PackageMinus size={17} />}
+                          </div>
+                          <div className="ff-body" style={{ flex: 1, marginLeft: 12, fontSize: 14.5, fontWeight: 600, color: C.ink, lineHeight: 1.35, minWidth: 0 }}>{describe(t)}</div>
+                          {t.kind === 'purchase' && Number(t.cost) > 0 && <div className="ff-display" style={{ fontSize: 14.5, color: C.ink, marginRight: 6 }}>₹{t.cost}</div>}
+                          <ChevronRight size={16} color={C.grey} />
+                        </div>
+                      ))}
                     </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        <SectionTitle title="Recent transactions" />
-        {recent.length === 0 ? (
-          <MutedNote text="No feed purchases or usage logged yet." />
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {recent.map((t) => {
-              const f = feedTypes.find((x) => x.id === t.feedTypeId);
-              return (
-                <div key={t.id} onClick={() => setViewingTxn(t)} style={rowCardStyle}>
-                  <div style={{ color: t.kind === 'purchase' ? C.green : C.grey }}>
-                    {t.kind === 'purchase' ? <PackagePlus size={16} /> : <PackageMinus size={16} />}
                   </div>
-                  <div style={{ flex: 1, marginLeft: 10 }}>
-                    <div className="ff-display" style={{ fontWeight: 700, fontSize: 14, color: C.ink }}>{f ? f.name : 'Unknown'} · {t.bags} bags</div>
-                    <div style={{ fontSize: 13, color: C.sub }}>{fmtDate(t.date)} · {t.kind === 'purchase' ? `Purchased${t.cost ? ` · ₹${t.cost}` : ''}` : 'Used'}</div>
-                  </div>
-                  <ChevronRight size={16} color={C.grey} />
-                </div>
-              );
-            })}
-          </div>
+                ))}
+                {history.length > historyCount && (
+                  <button onClick={() => setHistoryCount((n) => n + 20)} className="ff-body" style={{ width: '100%', background: C.greySoft, color: C.ink, border: 'none', borderRadius: 12, padding: '12px 0', fontSize: 15, fontWeight: 700 }}>
+                    Show more ({history.length - historyCount} older)
+                  </button>
+                )}
+              </>
+            )}
+          </>
         )}
       </div>
       {viewingTxn && (
@@ -4431,20 +4648,94 @@ function FeedScreen({ feedTypes, feedTransactions, onAddType, onEditType, onDele
           onDelete={(id) => { onDeleteTxn(id); setViewingTxn(null); }}
         />
       )}
-      <FAB onClick={onAddType} label="Add feed type" />
+      {fixing && (
+        <FixStockModal
+          feedType={fixing} appStock={feedStock(fixing.id, feedTransactions)}
+          onClose={() => setFixing(null)}
+          onSave={async (kind, bags) => {
+            await onQuickTxn(fixing.id, kind, { date: todayStr(), bags, cost: kind === 'purchase' ? 0 : undefined, notes: STOCK_FIX_NOTE });
+            setFixing(null);
+          }}
+        />
+      )}
+      {feedTypes.length > 0 && <FAB onClick={onAddType} label="Add feed" />}
     </div>
   );
 }
 
-function FeedTypeForm({ initial, onClose, onSave }) {
+// "I counted my bags and the app's number is wrong" — records the difference so stock matches reality
+function FixStockModal({ feedType, appStock, onClose, onSave }) {
+  const [actual, setActual] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const has = actual !== '' && !isNaN(Number(actual)) && Number(actual) >= 0;
+  const diff = has ? Math.round((Number(actual) - appStock) * 10) / 10 : 0;
+  const save = async () => {
+    if (!has || diff === 0) return;
+    setBusy(true); setErr('');
+    try { await onSave(diff < 0 ? 'usage' : 'purchase', Math.abs(diff)); }
+    catch (e) { setErr("Couldn't save — please try again."); setBusy(false); }
+  };
+  return (
+    <Modal title={`Fix stock — ${feedType.name}`} onClose={onClose}>
+      <div className="ff-body" style={{ background: C.greySoft, borderRadius: 12, padding: '10px 12px', fontSize: 14.5, color: C.sub, marginBottom: 14 }}>
+        The app thinks you have <b style={{ color: C.ink }}>{fmtBags(appStock)} bags</b>.
+      </div>
+      <Field label="How many bags do you really have now?">
+        <input type="number" min={0} step="0.5" value={actual} onChange={(e) => setActual(e.target.value)} placeholder="Count the bags" style={inputStyle} autoFocus />
+      </Field>
+      {has && diff === 0 && <div className="ff-body" style={{ color: C.green, fontWeight: 700, fontSize: 14.5, marginBottom: 12 }}>✓ That already matches — nothing to fix.</div>}
+      {has && diff !== 0 && (
+        <div className="ff-body" style={{ background: diff < 0 ? C.amberSoft : C.greenSoft, color: diff < 0 ? C.amber : C.green, borderRadius: 12, padding: '10px 12px', fontSize: 14, marginBottom: 12, lineHeight: 1.45 }}>
+          {diff < 0
+            ? `${fmtBags(-diff)} bags will be counted as used (their cost goes into Finance).`
+            : `${fmtBags(diff)} extra bags will be added to your stock (no cost).`}
+        </div>
+      )}
+      {err && <div className="ff-body" style={{ color: C.rust, fontSize: 13.5, marginBottom: 10 }}>{err}</div>}
+      <PrimaryButton disabled={!has || diff === 0 || busy} onClick={save}>{busy ? 'Saving…' : 'Update stock'}</PrimaryButton>
+    </Modal>
+  );
+}
+
+function FeedTypeForm({ initial, txnCount = 0, onClose, onSave, onDelete }) {
   const [name, setName] = useState(initial?.name || '');
   const [costPerBag, setCostPerBag] = useState(initial?.costPerBag || '');
-  const valid = name.trim() && costPerBag !== '';
+  const [openingBags, setOpeningBags] = useState('');
+  const [confirmDel, setConfirmDel] = useState(false);
+  const valid = name.trim() && costPerBag !== '' && Number(costPerBag) >= 0;
+
+  if (confirmDel) {
+    return (
+      <Modal title={`Delete ${initial.name}?`} onClose={() => setConfirmDel(false)}>
+        <div className="ff-body" style={{ fontSize: 14.5, color: C.sub, marginBottom: 14, lineHeight: 1.5 }}>
+          This also deletes its {txnCount} purchase and usage {txnCount === 1 ? 'entry' : 'entries'}. This can't be undone.
+        </div>
+        <PrimaryButton danger onClick={onDelete}>Delete permanently</PrimaryButton>
+      </Modal>
+    );
+  }
   return (
-    <Modal title={initial ? 'Edit Feed Type' : 'Add Feed Type'} onClose={onClose}>
+    <Modal title={initial ? 'Edit feed' : 'Add a feed'} onClose={onClose}>
       <Field label="Feed name"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Concentrate mix" style={inputStyle} /></Field>
-      <Field label="Cost per bag (₹)"><input type="number" min={0} value={costPerBag} onChange={(e) => setCostPerBag(e.target.value)} placeholder="e.g. 1200" style={inputStyle} /></Field>
-      <PrimaryButton disabled={!valid} onClick={() => onSave({ name: name.trim(), costPerBag: Number(costPerBag) })}>{initial ? 'Save changes' : 'Add feed type'}</PrimaryButton>
+      <Field label="Price of one bag (₹)"><input type="number" min={0} value={costPerBag} onChange={(e) => setCostPerBag(e.target.value)} placeholder="e.g. 1200" style={inputStyle} /></Field>
+      {!initial && (
+        <Field label="Bags you have right now (optional)">
+          <input type="number" min={0} step="0.5" value={openingBags} onChange={(e) => setOpeningBags(e.target.value)} placeholder="e.g. 20" style={inputStyle} />
+          <div className="ff-body" style={{ fontSize: 12.5, color: C.sub, marginTop: 6 }}>The app starts counting from this number.</div>
+        </Field>
+      )}
+      <PrimaryButton
+        disabled={!valid}
+        onClick={() => onSave({ name: name.trim(), costPerBag: Number(costPerBag), openingBags: !initial && Number(openingBags) > 0 ? Number(openingBags) : 0 })}
+      >
+        {initial ? 'Save changes' : 'Add feed'}
+      </PrimaryButton>
+      {initial && onDelete && (
+        <button onClick={() => setConfirmDel(true)} className="ff-body" style={{ width: '100%', background: 'none', border: 'none', color: C.rust, fontSize: 15, fontWeight: 700, padding: '16px 0 4px' }}>
+          Delete this feed
+        </button>
+      )}
     </Modal>
   );
 }
@@ -4456,19 +4747,19 @@ function FeedTxnForm({ feedType, kind, onClose, onSave }) {
   const valid = date && bags !== '' && Number(bags) > 0;
   const suggestedCost = feedType && bags !== '' ? (Number(bags) * Number(feedType.costPerBag)).toFixed(0) : '';
   return (
-    <Modal title={`${kind === 'purchase' ? 'Log Purchase' : 'Log Usage'} — ${feedType ? feedType.name : ''}`} onClose={onClose}>
+    <Modal title={`${kind === 'purchase' ? 'Add stock' : 'Log feed used'} — ${feedType ? feedType.name : ''}`} onClose={onClose}>
       <Field label="Date"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} max={todayStr()} /></Field>
-      <Field label="Bags"><input type="number" min={0} step="0.5" value={bags} onChange={(e) => setBags(e.target.value)} placeholder="e.g. 5" style={inputStyle} /></Field>
+      <Field label={kind === 'purchase' ? 'Bags bought' : 'Bags used'}><input type="number" min={0} step="0.5" value={bags} onChange={(e) => setBags(e.target.value)} placeholder="e.g. 5" style={inputStyle} /></Field>
       {kind === 'purchase' && (
-        <Field label="Total cost (₹, optional)">
-          <input type="number" min={0} value={cost} onChange={(e) => setCost(e.target.value)} placeholder={suggestedCost ? `Suggested: ${suggestedCost}` : 'e.g. 6000'} style={inputStyle} />
+        <Field label="Total price paid (₹, optional)">
+          <input type="number" min={0} value={cost} onChange={(e) => setCost(e.target.value)} placeholder={suggestedCost ? `Leave blank for ₹${suggestedCost}` : 'e.g. 6000'} style={inputStyle} />
         </Field>
       )}
       <PrimaryButton
         disabled={!valid}
         onClick={() => onSave({ date, bags: Number(bags), cost: kind === 'purchase' ? Number(cost || suggestedCost || 0) : undefined })}
       >
-        Save {kind === 'purchase' ? 'purchase' : 'usage'}
+        {kind === 'purchase' ? 'Add to stock' : 'Save'}
       </PrimaryButton>
     </Modal>
   );
@@ -4477,15 +4768,19 @@ function FeedTxnForm({ feedType, kind, onClose, onSave }) {
 function FeedTxnDetailModal({ record, feedType, onClose, onUpdate, onDelete }) {
   const { isReadOnly } = useContext(RoleContext);
   const [editing, setEditing] = useState(false);
+  const [date, setDate] = useState(record.date);
   const [bags, setBags] = useState(String(record.bags));
   const [cost, setCost] = useState(record.cost != null ? String(record.cost) : '');
   const [confirmDel, setConfirmDel] = useState(false);
+  const isFix = record.notes === STOCK_FIX_NOTE;
+  const isOpening = record.notes === OPENING_STOCK_NOTE;
+  const title = isFix ? 'Stock correction' : isOpening ? 'Starting stock' : record.kind === 'purchase' ? 'Stock added' : 'Feed used';
 
   if (confirmDel) {
     return (
       <Modal title="Delete this entry?" onClose={() => setConfirmDel(false)}>
-        <div style={{ fontSize: 14, color: C.sub, marginBottom: 14 }}>
-          This removes this {record.kind} entry ({record.bags} bags) for {fmtDate(record.date)}. This can't be undone.
+        <div className="ff-body" style={{ fontSize: 14.5, color: C.sub, marginBottom: 14, lineHeight: 1.5 }}>
+          This removes “{title}” ({fmtBags(record.bags)} bags) from {fmtDate(record.date)}. Your stock count will change. This can't be undone.
         </div>
         <PrimaryButton danger onClick={() => onDelete(record.id)}>Delete permanently</PrimaryButton>
       </Modal>
@@ -4494,46 +4789,47 @@ function FeedTxnDetailModal({ record, feedType, onClose, onUpdate, onDelete }) {
 
   const save = () => {
     const n = Number(bags);
-    if (isNaN(n) || n <= 0) return;
-    const data = { bags: n };
+    if (isNaN(n) || n <= 0 || !date) return;
+    const data = { bags: n, date };
     if (record.kind === 'purchase') data.cost = cost === '' ? null : Number(cost);
     onUpdate(record.id, data);
   };
 
   return (
-    <Modal title={`${record.kind === 'purchase' ? 'Purchase' : 'Usage'} Entry`} onClose={onClose}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-        <div style={{ color: record.kind === 'purchase' ? C.green : C.grey }}>
-          {record.kind === 'purchase' ? <PackagePlus size={18} /> : <PackageMinus size={18} />}
+    <Modal title={title} onClose={onClose}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+        <div style={{ width: 40, height: 40, borderRadius: 20, background: record.kind === 'purchase' ? C.greenSoft : C.greySoft, color: record.kind === 'purchase' ? C.green : C.sub, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          {record.kind === 'purchase' ? <PackagePlus size={19} /> : <PackageMinus size={19} />}
         </div>
         <div>
-          <div className="ff-display" style={{ fontWeight: 700, fontSize: 15, color: C.ink }}>{feedType ? feedType.name : 'Unknown feed'}</div>
-          <div style={{ fontSize: 13, color: C.sub }}>{fmtDate(record.date)}</div>
+          <div className="ff-display" style={{ fontSize: 16, color: C.ink }}>{feedType ? feedType.name : 'Unknown feed'}</div>
+          <div className="ff-body" style={{ fontSize: 13.5, color: C.sub }}>{fmtDate(record.date)}</div>
         </div>
       </div>
 
       {editing ? (
         <>
+          <Field label="Date"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} max={todayStr()} style={inputStyle} /></Field>
           <Field label="Bags"><input type="number" min={0} step="0.5" value={bags} onChange={(e) => setBags(e.target.value)} style={inputStyle} /></Field>
-          {record.kind === 'purchase' && (
-            <Field label="Total cost (₹)"><input type="number" min={0} value={cost} onChange={(e) => setCost(e.target.value)} style={inputStyle} /></Field>
+          {record.kind === 'purchase' && !isFix && !isOpening && (
+            <Field label="Total price paid (₹)"><input type="number" min={0} value={cost} onChange={(e) => setCost(e.target.value)} style={inputStyle} /></Field>
           )}
           <PrimaryButton onClick={save}>Save changes</PrimaryButton>
         </>
       ) : (
         <>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 18 }}>
-            <DetailRow label="Bags" value={`${record.bags} bags`} />
-            {record.kind === 'purchase' && <DetailRow label="Total cost" value={record.cost ? `₹${record.cost}` : '—'} />}
-            {record.notes && <DetailRow label="Notes" value={record.notes} />}
+            <DetailRow label="Bags" value={`${fmtBags(record.bags)} bags${isFix ? (record.kind === 'usage' ? ' fewer' : ' more') : ''}`} />
+            {record.kind === 'purchase' && !isFix && !isOpening && <DetailRow label="Price paid" value={record.cost ? `₹${record.cost}` : '—'} />}
+            {record.notes && !isFix && !isOpening && <DetailRow label="Notes" value={record.notes} />}
           </div>
           {!isReadOnly && (
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => setEditing(true)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.brandSoft, color: C.brand, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 14, fontWeight: 700 }}>
-                <Pencil size={14} /> Edit
+              <button onClick={() => setEditing(true)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.brandSoft, color: C.brand, border: 'none', borderRadius: 12, padding: '12px 0', fontSize: 15, fontWeight: 700 }}>
+                <Pencil size={15} /> Edit
               </button>
-              <button onClick={() => setConfirmDel(true)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.rustSoft, color: C.rust, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 14, fontWeight: 700 }}>
-                <Trash2 size={14} /> Delete
+              <button onClick={() => setConfirmDel(true)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.rustSoft, color: C.rust, border: 'none', borderRadius: 12, padding: '12px 0', fontSize: 15, fontWeight: 700 }}>
+                <Trash2 size={15} /> Delete
               </button>
             </div>
           )}
