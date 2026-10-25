@@ -1632,14 +1632,15 @@ export default function App() {
                     if (data.date) patch.date = data.date;
                     if ('cost' in data) patch.cost = data.cost;
                     const { data: row, error } = await supabase.from('feed_transactions').update(patch).eq('id', id).select().single();
-                    if (!error && row) setFeedTransactions(feedTransactions.map((t) => (t.id === id ? mapFeedTxnFromRow(row) : t)));
+                    if (error || !row) throw new Error(error ? error.message : 'Could not save');
+                    setFeedTransactions((prev) => prev.map((t) => (t.id === id ? mapFeedTxnFromRow(row) : t)));
                   }}
                   onDeleteTxn={async (id) => {
                     await supabase.from('feed_transactions').delete().eq('id', id);
-                    setFeedTransactions(feedTransactions.filter((t) => t.id !== id));
+                    setFeedTransactions((prev) => prev.filter((t) => t.id !== id));
                   }}
                   onExport={(kind) => {
-                    const summaryHeaders = ['Feed Type', 'Cost/Bag (₹)', 'Bags Left', 'Purchased (Total)', 'Used (Total)', 'Amount Debited (₹)', 'Stock Value / Saved (₹)'];
+                    const summaryHeaders = ['Feed Type', 'Cost/Bag (₹)', 'Bags Left', 'Purchased (Total)', 'Used (Total)', 'Money Spent on Buying (₹)', 'Value of Stock in Hand (₹)'];
                     const summaryRows = feedTypes.map((f) => [
                       f.name, f.costPerBag, feedStock(f.id, feedTransactions), feedTotalPurchased(f.id, feedTransactions),
                       feedTotalUsed(f.id, feedTransactions), feedTotalDebited(f.id, feedTransactions).toFixed(0), feedStockValue(f, feedTransactions).toFixed(0),
@@ -1647,7 +1648,8 @@ export default function App() {
                     const txnHeaders = ['Date', 'Feed Type', 'Transaction', 'Bags', 'Cost (₹)', 'Notes'];
                     const txnRows = feedTransactions.slice().sort((a, b) => a.date.localeCompare(b.date)).map((t) => {
                       const ft = feedTypes.find((f) => f.id === t.feedTypeId);
-                      return [fmtDate(t.date), ft ? ft.name : 'Unknown', t.kind === 'purchase' ? 'Purchased' : 'Used', t.bags, t.kind === 'purchase' ? (t.cost || '') : '', t.notes || ''];
+                      const monthly = isMonthlyEntry(t);
+                      return [fmtDate(t.date), ft ? ft.name : 'Unknown', t.kind === 'purchase' ? 'Purchased' : monthly ? 'Used (monthly total)' : 'Used', t.bags, t.kind === 'purchase' ? (t.cost || '') : '', monthly ? `Total for ${monthLabel(monthOfEntry(t))}` : (t.notes || '')];
                     });
                     if (kind === 'print') {
                       setPrintJob({ type: 'feed', title: 'Feed Management Report', summaryHeaders, summaryRows, txnHeaders, txnRows });
@@ -4306,21 +4308,41 @@ const fmtBags = (n) => {
 };
 const daysBetween = (a, b) => Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 86400000);
 
-// Average bags used per day, from the last 14 days of entries (stock corrections are ignored).
-// Counted from the first to the LAST day that has an entry, so a day you haven't logged yet doesn't drag the average down.
+// Feed used is logged ONCE A MONTH per feed. Such an entry is a normal 'usage' entry marked with notes 'Monthly:YYYY-MM'
+// (dated the last day of that month, or today if it is the current month).
+const MONTHLY_PREFIX = 'Monthly:';
+const isMonthlyEntry = (t) => t.kind === 'usage' && typeof t.notes === 'string' && t.notes.startsWith(MONTHLY_PREFIX);
+const monthOfEntry = (t) => t.notes.slice(MONTHLY_PREFIX.length);
+const monthEndDate = (m) => { const [y, mo] = m.split('-').map(Number); return `${m}-${String(new Date(y, mo, 0).getDate()).padStart(2, '0')}`; };
+const entryDateForMonth = (m) => (m >= currentMonthStr() ? todayStr() : monthEndDate(m));
+const monthName = (m) => monthLabel(m).split(' ')[0];
+// how many days a monthly entry covers (a month that is still running counts only the days so far)
+function monthlyPeriodDays(m, entryDate) {
+  const end = monthEndDate(m);
+  return entryDate >= end ? Number(end.slice(8, 10)) : Math.max(1, Number(entryDate.slice(8, 10)));
+}
+function feedMonthlyEntry(feedTypeId, txns, month) {
+  return txns.find((t) => t.feedTypeId === feedTypeId && isMonthlyEntry(t) && monthOfEntry(t) === month) || null;
+}
+// Average bags used per day. Uses the latest 3 monthly totals; if none were logged, falls back to older daily entries (last 14 days).
 function feedUsageRate(feedTypeId, txns) {
+  const monthly = txns.filter((t) => t.feedTypeId === feedTypeId && isMonthlyEntry(t)).sort((x, y) => monthOfEntry(y).localeCompare(monthOfEntry(x))).slice(0, 3);
+  if (monthly.length) {
+    const bags = monthly.reduce((sum, t) => sum + Number(t.bags), 0);
+    const days = monthly.reduce((sum, t) => sum + monthlyPeriodDays(monthOfEntry(t), t.date), 0);
+    return days > 0 ? bags / days : 0;
+  }
   const today = todayStr();
   const since = addDays(today, -13);
   const recent = txns.filter((t) => t.feedTypeId === feedTypeId && t.kind === 'usage' && t.notes !== STOCK_FIX_NOTE && t.date >= since && t.date <= today);
   if (!recent.length) return 0;
   const first = recent.reduce((m, t) => (t.date < m ? t.date : m), recent[0].date);
   const last = recent.reduce((m, t) => (t.date > m ? t.date : m), recent[0].date);
-  const span = Math.max(1, daysBetween(first, last) + 1);
-  return recent.reduce((sum, t) => sum + Number(t.bags), 0) / span;
+  return recent.reduce((sum, t) => sum + Number(t.bags), 0) / Math.max(1, daysBetween(first, last) + 1);
 }
-// Date of the most recent daily-use entry for a feed (or '')
-function feedLastUsed(feedTypeId, txns) {
-  return txns.filter((t) => t.feedTypeId === feedTypeId && t.kind === 'usage' && t.notes !== STOCK_FIX_NOTE).reduce((m, t) => (t.date > m ? t.date : m), '');
+// does this feed have ANY use recorded in the given month (monthly total or older daily entries)?
+function feedHasUseInMonth(feedTypeId, txns, month) {
+  return txns.some((t) => t.feedTypeId === feedTypeId && t.kind === 'usage' && t.notes !== STOCK_FIX_NOTE && (isMonthlyEntry(t) ? monthOfEntry(t) === month : t.date.slice(0, 7) === month));
 }
 function feedStatus(stock, perDay) {
   if (stock <= 0) return { level: 'out', days: 0, tone: 'rust', label: 'Out of stock' };
@@ -4331,9 +4353,6 @@ function feedStatus(stock, perDay) {
   if (days < 7) return { level: 'soon', days, tone: 'amber', label: `${text} left — buy soon` };
   return { level: 'ok', days, tone: 'green', label: `${text} left` };
 }
-function feedLoggedOn(feedTypeId, txns, date) {
-  return txns.filter((t) => t.feedTypeId === feedTypeId && t.kind === 'usage' && t.date === date && t.notes !== STOCK_FIX_NOTE).reduce((s, t) => s + Number(t.bags), 0);
-}
 const dayHeading = (date) => (date === todayStr() ? 'Today' : date === addDays(todayStr(), -1) ? 'Yesterday' : fmtDate(date));
 const FEED_TONES = {
   green: { bg: C.greenSoft, fg: C.green, bar: C.green },
@@ -4342,19 +4361,19 @@ const FEED_TONES = {
   grey: { bg: C.greySoft, fg: C.sub, bar: '#C9CBD3' },
 };
 
-function BagStepper({ value, onChange, disabled }) {
+function BagStepper({ value, onChange, disabled, step: stepBy = 5 }) {
   const n = Number(value || 0);
-  const step = (d) => onChange(String(Math.max(0, Math.round((n + d) * 2) / 2)));
-  const btn = { width: 38, height: 40, border: 'none', background: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.brand };
+  const step = (d) => onChange(String(Math.max(0, Math.round((n + d) * 10) / 10)));
+  const btn = { width: 32, height: 40, border: 'none', background: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.brand };
   return (
     <div style={{ display: 'flex', alignItems: 'center', border: `1.5px solid ${C.line}`, borderRadius: 12, background: '#fff', flexShrink: 0 }}>
-      <button onClick={() => step(-0.5)} disabled={disabled} aria-label="Less" style={btn}><Minus size={17} strokeWidth={2.6} /></button>
+      <button onClick={() => step(-stepBy)} disabled={disabled} aria-label="Less" style={btn}><Minus size={17} strokeWidth={2.6} /></button>
       <input
         value={value} inputMode="decimal" placeholder="0" aria-label="Bags"
         onChange={(e) => { const v = e.target.value.replace(',', '.'); if (/^\d*\.?\d{0,1}$/.test(v)) onChange(v); }}
         style={{ width: 46, textAlign: 'center', border: 'none', outline: 'none', fontSize: 17, fontWeight: 700, color: C.ink, background: 'transparent', fontFamily: 'inherit' }}
       />
-      <button onClick={() => step(0.5)} disabled={disabled} aria-label="More" style={btn}><Plus size={17} strokeWidth={2.6} /></button>
+      <button onClick={() => step(stepBy)} disabled={disabled} aria-label="More" style={btn}><Plus size={17} strokeWidth={2.6} /></button>
     </div>
   );
 }
@@ -4364,7 +4383,8 @@ function FeedScreen({ feedTypes, feedTransactions, onAddType, onEditType, onLogT
   const [viewingTxn, setViewingTxn] = useState(null);
   const [fixing, setFixing] = useState(null);
   const [openDetails, setOpenDetails] = useState({});
-  const [logDay, setLogDay] = useState('today'); // 'today' | 'yesterday'
+  const [monthChoice, setMonthChoice] = useState('this'); // 'this' | 'last' | 'other'
+  const [otherMonth, setOtherMonth] = useState('');
   const [qty, setQty] = useState({});
   const [saving, setSaving] = useState({});
   const [error, setError] = useState('');
@@ -4372,8 +4392,10 @@ function FeedScreen({ feedTypes, feedTransactions, onAddType, onEditType, onLogT
   const [historyCount, setHistoryCount] = useState(12);
 
   const today = todayStr();
-  const logDate = logDay === 'today' ? today : addDays(today, -1);
   const month = currentMonthStr();
+  const lastMonth = shiftMonth(month, -1);
+  const logMonth = monthChoice === 'this' ? month : monthChoice === 'last' ? lastMonth : (otherMonth || '');
+  const logDate = logMonth ? entryDateForMonth(logMonth) : today;
 
   const infos = feedTypes.map((f) => {
     const stock = feedStock(f.id, feedTransactions);
@@ -4401,18 +4423,21 @@ function FeedScreen({ feedTypes, feedTransactions, onAddType, onEditType, onLogT
     if (last && last.date === t.date) last.items.push(t); else groups.push({ date: t.date, items: [t] });
   });
 
-  const logUsage = async (f, amount) => {
+  // one total per feed per month; logging the same month again updates that total instead of adding a second one
+  const logMonthly = async (f, amount) => {
     const n = Number(amount);
-    if (!(n > 0) || saving[f.id]) return;
-    setSaving((s) => ({ ...s, [f.id]: true }));
+    if (!(n > 0) || !logMonth || saving[f.id]) return;
+    setSaving((x) => ({ ...x, [f.id]: true }));
     setError('');
     try {
-      await onQuickTxn(f.id, 'usage', { date: logDate, bags: n });
+      const existing = feedMonthlyEntry(f.id, feedTransactions, logMonth);
+      if (existing) await onUpdateTxn(existing.id, { bags: n, date: logDate });
+      else await onQuickTxn(f.id, 'usage', { date: logDate, bags: n, notes: MONTHLY_PREFIX + logMonth });
       setQty((q) => { const c = { ...q }; delete c[f.id]; return c; });
     } catch (e) {
       setError("Couldn't save — please check your connection and try again.");
     } finally {
-      setSaving((s) => ({ ...s, [f.id]: false }));
+      setSaving((x) => ({ ...x, [f.id]: false }));
     }
   };
 
@@ -4421,6 +4446,7 @@ function FeedScreen({ feedTypes, feedTransactions, onAddType, onEditType, onLogT
     const name = f ? f.name : 'Feed';
     if (t.notes === STOCK_FIX_NOTE) return `Stock corrected: ${fmtBags(t.bags)} ${t.kind === 'usage' ? 'fewer' : 'more'} bags · ${name}`;
     if (t.notes === OPENING_STOCK_NOTE) return `Starting stock ${fmtBags(t.bags)} bags · ${name}`;
+    if (isMonthlyEntry(t)) return `Used ${fmtBags(t.bags)} bags in ${monthName(monthOfEntry(t))} · ${name}`;
     return `${t.kind === 'purchase' ? 'Bought' : 'Used'} ${fmtBags(t.bags)} bags · ${name}`;
   };
 
@@ -4431,7 +4457,7 @@ function FeedScreen({ feedTypes, feedTransactions, onAddType, onEditType, onLogT
     }
     : anyData
       ? { tone: 'green', icon: '✅', title: 'Feed stock looks fine', detail: 'Everything you have lasts a week or more.' }
-      : { tone: 'grey', icon: '📝', title: 'Log your daily feed', detail: "After a few days I'll tell you how long each feed will last." };
+      : { tone: 'grey', icon: '📝', title: 'Log your monthly feed', detail: "Once you log how much feed you used in a month, I'll tell you how long each feed will last." };
 
   return (
     <div style={{ paddingBottom: 110 }}>
@@ -4451,7 +4477,7 @@ function FeedScreen({ feedTypes, feedTransactions, onAddType, onEditType, onLogT
               <div style={{ width: 72, height: 72, borderRadius: 36, background: C.brandSoft, color: C.brand, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}><Wheat size={32} /></div>
               <div className="ff-display" style={{ fontSize: 19, color: C.ink }}>Set up your feed in 3 steps</div>
             </div>
-            {[['1', 'Add each feed you use', 'e.g. Concentrate, Dry fodder — with the price of one bag.'], ['2', 'Enter the stock you have now', 'So the app starts with the right number.'], ['3', 'Log how much you feed each day', "One tap per feed. I'll tell you when to buy more."]].map(([n, t, d]) => (
+            {[['1', 'Add each feed you use', 'e.g. Concentrate, Dry fodder — with the price of one bag.'], ['2', 'Enter the stock you have now', 'So the app starts with the right number.'], ['3', 'Once a month, log how much you used', "One number per feed. I'll tell you when to buy more."]].map(([n, t, d]) => (
               <div key={n} style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
                 <div className="ff-display" style={{ width: 28, height: 28, borderRadius: 14, background: C.brand, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0 }}>{n}</div>
                 <div><div className="ff-body" style={{ fontWeight: 700, fontSize: 15, color: C.ink }}>{t}</div><div className="ff-body" style={{ fontSize: 13.5, color: C.sub }}>{d}</div></div>
@@ -4470,42 +4496,57 @@ function FeedScreen({ feedTypes, feedTransactions, onAddType, onEditType, onLogT
               </div>
             </div>
 
-            {/* 2. What do I log today? */}
+            {/* 2. Log last month / this month's feed */}
             {!isReadOnly && (
               <div style={{ background: '#fff', borderRadius: 20, padding: '14px 16px', boxShadow: C.shadow, marginBottom: 18 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 6 }}>
-                  <div className="ff-display" style={{ fontSize: 17, color: C.ink }}>Log feed used</div>
-                  <Segmented options={['today', 'yesterday']} value={logDay} onChange={setLogDay} labels={{ today: 'Today', yesterday: 'Yesterday' }} />
+                <div className="ff-display" style={{ fontSize: 17, color: C.ink }}>Log feed used</div>
+                <div className="ff-body" style={{ fontSize: 13.5, color: C.sub, margin: '2px 0 10px', lineHeight: 1.4 }}>
+                  One number per feed for the whole month — bags used in total.
                 </div>
-                {infos.map(({ f, rate }, i) => {
-                  const logged = feedLoggedOn(f.id, feedTransactions, logDate);
-                  const usual = rate > 0 ? Math.max(0.5, Math.round(rate * 2) / 2) : null;
-                  const value = qty[f.id] ?? (usual != null ? String(usual) : '');
-                  const lastUsed = feedLastUsed(f.id, feedTransactions);
-                  const quietDays = lastUsed ? daysBetween(lastUsed, today) : 0;
-                  return (
-                    <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderTop: i ? `1px solid ${C.line}` : 'none' }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div className="ff-display" style={{ fontSize: 15.5, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</div>
-                        <div className="ff-body" style={{ fontSize: 12.5, fontWeight: logged > 0 || quietDays >= 2 ? 700 : 500, color: logged > 0 ? C.green : quietDays >= 2 ? C.amber : C.sub }}>
-                          {logged > 0
-                            ? `✓ ${fmtBags(logged)} bags logged`
-                            : quietDays >= 2 && logDay === 'today'
-                              ? `Last logged ${quietDays} days ago`
-                              : usual != null ? `Usual: ${fmtBags(usual)} bags a day` : 'Nothing logged yet'}
+                <Segmented
+                  options={['this', 'last', 'other']} value={monthChoice} onChange={setMonthChoice}
+                  labels={{ this: monthName(month), last: monthName(lastMonth), other: 'Other month' }}
+                />
+                {monthChoice === 'other' && (
+                  <input
+                    type="month" value={otherMonth} max={lastMonth} aria-label="Month"
+                    onChange={(e) => setOtherMonth(e.target.value)}
+                    style={{ ...inputStyle, marginTop: 10 }}
+                  />
+                )}
+                {!logMonth ? (
+                  <div className="ff-body" style={{ fontSize: 13.5, color: C.sub, padding: '14px 0 2px' }}>Pick the month you want to log.</div>
+                ) : (
+                  infos.map(({ f, rate }, i) => {
+                    const existing = feedMonthlyEntry(f.id, feedTransactions, logMonth);
+                    const usual = rate > 0 ? Math.max(1, Math.round(rate * 30)) : null;
+                    const value = qty[f.id] ?? (existing ? String(existing.bags) : usual != null ? String(usual) : '');
+                    const prevMonth = shiftMonth(logMonth, -1);
+                    const missingPrev = !existing && monthChoice === 'this' && feedTransactions.some((t) => t.feedTypeId === f.id && t.kind === 'usage') && !feedHasUseInMonth(f.id, feedTransactions, prevMonth);
+                    return (
+                      <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderTop: i ? `1px solid ${C.line}` : 'none', marginTop: i ? 0 : 10 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div className="ff-display" style={{ fontSize: 15.5, color: C.ink, lineHeight: 1.2, wordBreak: 'break-word' }}>{f.name}</div>
+                          <div className="ff-body" style={{ fontSize: 12.5, fontWeight: existing || missingPrev ? 700 : 500, color: existing ? C.green : missingPrev ? C.amber : C.sub }}>
+                            {existing
+                              ? `✓ ${fmtBags(existing.bags)} bags logged`
+                              : missingPrev
+                                ? `${monthName(prevMonth)} not logged`
+                                : usual != null ? `Usual: ${fmtBags(usual)} bags` : 'Nothing logged yet'}
+                          </div>
                         </div>
+                        <BagStepper value={value} onChange={(v) => setQty((q) => ({ ...q, [f.id]: v }))} disabled={saving[f.id]} />
+                        <button
+                          onClick={() => logMonthly(f, value)} disabled={saving[f.id] || !(Number(value) > 0)}
+                          className="ff-body"
+                          style={{ background: C.brand, color: '#fff', border: 'none', borderRadius: 12, padding: '0 14px', height: 42, fontSize: 15, fontWeight: 700, opacity: saving[f.id] || !(Number(value) > 0) ? 0.45 : 1, flexShrink: 0 }}
+                        >
+                          {saving[f.id] ? '…' : existing ? 'Update' : 'Log'}
+                        </button>
                       </div>
-                      <BagStepper value={value} onChange={(v) => setQty((q) => ({ ...q, [f.id]: v }))} disabled={saving[f.id]} />
-                      <button
-                        onClick={() => logUsage(f, value)} disabled={saving[f.id] || !(Number(value) > 0)}
-                        className="ff-body"
-                        style={{ background: C.brand, color: '#fff', border: 'none', borderRadius: 12, padding: '0 14px', height: 42, fontSize: 15, fontWeight: 700, opacity: saving[f.id] || !(Number(value) > 0) ? 0.45 : 1, flexShrink: 0 }}
-                      >
-                        {saving[f.id] ? '…' : logged > 0 ? 'Add' : 'Log'}
-                      </button>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                )}
                 {error && <div className="ff-body" style={{ background: C.rustSoft, color: C.rust, borderRadius: 10, padding: '8px 10px', fontSize: 13, marginTop: 8 }}>{error}</div>}
               </div>
             )}
@@ -4543,7 +4584,7 @@ function FeedScreen({ feedTypes, feedTransactions, onAddType, onEditType, onLogT
                     <div className="ff-body" style={{ fontSize: 13.5, color: C.sub, lineHeight: 1.4 }}>
                       {stock < 0
                         ? 'The app thinks more was used than bought — tap “Fix stock” to match what you really have.'
-                        : rate > 0 ? `You use about ${fmtBags(rate)} bags a day.` : 'Log the feed you use each day, and I’ll work out how long this lasts.'}
+                        : rate > 0 ? `You use about ${fmtBags(Math.round(rate * 30))} bags a month.` : 'Log how much you used in a month, and I’ll work out how long this lasts.'}
                     </div>
                     {!isReadOnly && (
                       <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
@@ -4644,7 +4685,10 @@ function FeedScreen({ feedTypes, feedTransactions, onAddType, onEditType, onLogT
           record={viewingTxn}
           feedType={feedTypes.find((f) => f.id === viewingTxn.feedTypeId)}
           onClose={() => setViewingTxn(null)}
-          onUpdate={(id, data) => { onUpdateTxn(id, data); setViewingTxn(null); }}
+          onUpdate={async (id, data) => {
+            setViewingTxn(null);
+            try { await onUpdateTxn(id, data); } catch (e) { setError("Couldn't save that change — please try again."); }
+          }}
           onDelete={(id) => { onDeleteTxn(id); setViewingTxn(null); }}
         />
       )}
@@ -4774,13 +4818,15 @@ function FeedTxnDetailModal({ record, feedType, onClose, onUpdate, onDelete }) {
   const [confirmDel, setConfirmDel] = useState(false);
   const isFix = record.notes === STOCK_FIX_NOTE;
   const isOpening = record.notes === OPENING_STOCK_NOTE;
-  const title = isFix ? 'Stock correction' : isOpening ? 'Starting stock' : record.kind === 'purchase' ? 'Stock added' : 'Feed used';
+  const isMonthly = isMonthlyEntry(record);
+  const whenText = isMonthly ? monthLabel(monthOfEntry(record)) : fmtDate(record.date);
+  const title = isFix ? 'Stock correction' : isOpening ? 'Starting stock' : isMonthly ? 'Feed used in a month' : record.kind === 'purchase' ? 'Stock added' : 'Feed used';
 
   if (confirmDel) {
     return (
       <Modal title="Delete this entry?" onClose={() => setConfirmDel(false)}>
         <div className="ff-body" style={{ fontSize: 14.5, color: C.sub, marginBottom: 14, lineHeight: 1.5 }}>
-          This removes “{title}” ({fmtBags(record.bags)} bags) from {fmtDate(record.date)}. Your stock count will change. This can't be undone.
+          This removes “{title}” ({fmtBags(record.bags)} bags) from {whenText}. Your stock count will change. This can't be undone.
         </div>
         <PrimaryButton danger onClick={() => onDelete(record.id)}>Delete permanently</PrimaryButton>
       </Modal>
@@ -4790,7 +4836,8 @@ function FeedTxnDetailModal({ record, feedType, onClose, onUpdate, onDelete }) {
   const save = () => {
     const n = Number(bags);
     if (isNaN(n) || n <= 0 || !date) return;
-    const data = { bags: n, date };
+    // a monthly total always keeps its month; a month still running is "as of today"
+    const data = { bags: n, date: isMonthly ? entryDateForMonth(monthOfEntry(record)) : date };
     if (record.kind === 'purchase') data.cost = cost === '' ? null : Number(cost);
     onUpdate(record.id, data);
   };
@@ -4803,14 +4850,14 @@ function FeedTxnDetailModal({ record, feedType, onClose, onUpdate, onDelete }) {
         </div>
         <div>
           <div className="ff-display" style={{ fontSize: 16, color: C.ink }}>{feedType ? feedType.name : 'Unknown feed'}</div>
-          <div className="ff-body" style={{ fontSize: 13.5, color: C.sub }}>{fmtDate(record.date)}</div>
+          <div className="ff-body" style={{ fontSize: 13.5, color: C.sub }}>{whenText}</div>
         </div>
       </div>
 
       {editing ? (
         <>
-          <Field label="Date"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} max={todayStr()} style={inputStyle} /></Field>
-          <Field label="Bags"><input type="number" min={0} step="0.5" value={bags} onChange={(e) => setBags(e.target.value)} style={inputStyle} /></Field>
+          {!isMonthly && <Field label="Date"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} max={todayStr()} style={inputStyle} /></Field>}
+          <Field label={isMonthly ? `Bags used in ${monthName(monthOfEntry(record))}` : 'Bags'}><input type="number" min={0} step="0.5" value={bags} onChange={(e) => setBags(e.target.value)} style={inputStyle} /></Field>
           {record.kind === 'purchase' && !isFix && !isOpening && (
             <Field label="Total price paid (₹)"><input type="number" min={0} value={cost} onChange={(e) => setCost(e.target.value)} style={inputStyle} /></Field>
           )}
