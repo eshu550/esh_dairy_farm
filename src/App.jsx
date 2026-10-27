@@ -190,12 +190,12 @@ function buildFarmContext({ cows, milk, heat, medical, financeEntries, feedTrans
   // ---- Health: last 180 days + any open follow-up ----
   const since180 = addDays(today, -180);
   const healthRows = medical
-    .filter((m) => m.date >= since180 || (m.nextDueDate && !m.completed))
+    .filter((m) => m.date >= since180 || openFollowups(m).length > 0)
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 70);
   sections.push('HEALTH RECORDS:\n' + (healthRows.length ? healthRows.map((m) => (
     `${m.date} ${label(m.cowId)}: ${m.type}` + (m.medicine ? ` (${clip(m.medicine, 25)})` : '') + (m.description ? ` - ${clip(m.description, 50)}` : '') +
-    (m.vet ? `; vet ${clip(m.vet, 20)}` : '') + (m.nextDueDate ? `; follow-up ${m.nextDueDate} ${m.completed ? '[done]' : '[open]'}` : '')
+    (m.vet ? `; vet ${clip(m.vet, 20)}` : '') + (medFollowups(m).length ? `; follow-ups ${medFollowups(m).map((f) => `${f.date} ${f.done ? '[done]' : '[open]'}`).join(', ')}` : '')
   )).join('\n') : 'none'));
 
   // ---- Stock ----
@@ -441,7 +441,7 @@ function CowPrintBody({ job }) {
       {medRows.length > 0 && (
         <>
           <div style={{ fontWeight: 700, fontSize: 14, margin: '14px 0 6px' }}>Health Records</div>
-          <PrintTable headers={['Date', 'Type', 'Medicine', 'Details', 'Vet', 'Next Due']} rows={medRows} />
+          <PrintTable headers={['Date', 'Type', 'Medicine', 'Details', 'Vet', 'Follow-ups']} rows={medRows} />
         </>
       )}
       {milkRows.length === 0 && heatRows.length === 0 && medRows.length === 0 && (
@@ -499,10 +499,10 @@ const MILK_HEADERS = ['Date', 'Tag #', 'Cow', 'Session', 'Liters'];
 function medExportRows(medical, cowById) {
   return medical.slice().sort((a, b) => a.date.localeCompare(b.date)).map((m) => {
     const cow = cowById(m.cowId);
-    return [fmtDate(m.date), cow ? cow.tagNumber : '', cow ? cow.name : 'Unknown', m.type, m.medicine || '', m.description || '', m.vet || '', m.nextDueDate ? fmtDate(m.nextDueDate) : ''];
+    return [fmtDate(m.date), cow ? cow.tagNumber : '', cow ? cow.name : 'Unknown', m.type, m.medicine || '', m.description || '', m.vet || '', followupsText(m)];
   });
 }
-const MED_HEADERS = ['Date', 'Tag #', 'Cow', 'Type', 'Medicine', 'Details', 'Vet', 'Next Follow-up'];
+const MED_HEADERS = ['Date', 'Tag #', 'Cow', 'Type', 'Medicine', 'Details', 'Vet', 'Follow-ups'];
 
 // ---------- Supabase row <-> app object mapping ----------
 const mapCowFromRow = (r) => ({
@@ -523,8 +523,46 @@ const mapMilkFromRow = (r) => ({ id: r.id, cowId: r.cow_id, date: r.date, sessio
 const milkToRow = (m, userId) => ({ user_id: userId, cow_id: m.cowId, date: m.date, session: m.session, liters: m.liters });
 const mapHeatFromRow = (r) => ({ id: r.id, cowId: r.cow_id, date: r.date, bred: r.bred, notes: r.notes || '' });
 const heatToRow = (h, userId) => ({ user_id: userId, cow_id: h.cowId, date: h.date, bred: !!h.bred, notes: h.notes || null });
-const mapMedFromRow = (r) => ({ id: r.id, cowId: r.cow_id, date: r.date, type: r.type, medicine: r.medicine || '', description: r.description || '', vet: r.vet || '', nextDueDate: r.next_due_date || '', completed: !!r.completed });
-const medToRow = (m, userId) => ({ user_id: userId, cow_id: m.cowId, date: m.date, type: m.type, medicine: m.medicine || null, description: m.description || null, vet: m.vet || null, next_due_date: m.nextDueDate || null, completed: !!m.completed });
+// A health record can have SEVERAL follow-ups: [{ date: 'YYYY-MM-DD', done: boolean }] (kept sorted by date).
+// Stored in the `followups` column. Older records only have next_due_date + completed, which is read as a single follow-up.
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const normFollowups = (list) => {
+  const seen = {};
+  (Array.isArray(list) ? list : []).forEach((f) => { if (f && DATE_RE.test(f.date)) seen[f.date] = !!(seen[f.date] || f.done); });
+  return Object.keys(seen).sort().map((date) => ({ date, done: seen[date] }));
+};
+const medFollowups = (m) => {
+  const fu = normFollowups(m && m.followups);
+  if (fu.length) return fu;
+  return m && m.nextDueDate ? [{ date: m.nextDueDate, done: !!m.completed }] : []; // old records / old backup files
+};
+const openFollowups = (m) => medFollowups(m).filter((f) => !f.done);
+const followupsText = (m) => medFollowups(m).map((f) => fmtDate(f.date) + (f.done ? ' (done)' : '')).join('; ');
+const mapMedFromRow = (r) => ({
+  id: r.id, cowId: r.cow_id, date: r.date, type: r.type, medicine: r.medicine || '', description: r.description || '', vet: r.vet || '',
+  followups: medFollowups({ followups: r.followups, nextDueDate: r.next_due_date, completed: r.completed }),
+});
+// next_due_date / completed are still written (earliest open follow-up / all done) so the old columns stay meaningful
+const followupColumns = (fu, withFollowups = true) => {
+  const open = fu.filter((f) => !f.done);
+  const cols = { next_due_date: open.length ? open[0].date : (fu.length ? fu[fu.length - 1].date : null), completed: fu.length > 0 && open.length === 0 };
+  if (withFollowups) cols.followups = fu;
+  return cols;
+};
+const medToRow = (m, userId, withFollowups = true) => ({
+  user_id: userId, cow_id: m.cowId, date: m.date, type: m.type, medicine: m.medicine || null, description: m.description || null, vet: m.vet || null,
+  ...followupColumns(medFollowups(m), withFollowups),
+});
+// Runs a health-record write with the `followups` column; if the database doesn't have that column yet, retries without it
+// (so saving keeps working, with a single follow-up) and tells the app to show the one-time setup step.
+async function runMedWrite(supported, onUnsupported, build) {
+  let res = await build(supported);
+  if (supported && res.error && /followups/i.test(res.error.message || '')) {
+    onUnsupported();
+    res = await build(false);
+  }
+  return res;
+}
 const mapFeedTypeFromRow = (r) => ({ id: r.id, name: r.name, costPerBag: r.cost_per_bag });
 const feedTypeToRow = (f, userId) => ({ user_id: userId, name: f.name, cost_per_bag: f.costPerBag });
 const mapFinanceFromRow = (r) => ({ id: r.id, date: r.date, type: r.type, category: r.category, amount: r.amount, notes: r.notes || '' });
@@ -1188,6 +1226,7 @@ export default function App() {
   const [milk, setMilk] = useState([]);
   const [heat, setHeat] = useState([]);
   const [medical, setMedical] = useState([]);
+  const [fuSupported, setFuSupported] = useState(true); // can the database hold several follow-ups per health record?
   const [feedTypes, setFeedTypes] = useState([]);
   const [feedTransactions, setFeedTransactions] = useState([]);
   const [financeEntries, setFinanceEntries] = useState([]);
@@ -1267,7 +1306,7 @@ export default function App() {
       }
       for (const med of restorePending.medical || []) {
         const cid = cowIdMap[med.cowId]; if (!cid) continue;
-        await supabase.from('medical_records').insert(medToRow({ ...med, cowId: cid }, userId));
+        await runMedWrite(fuSupported, () => setFuSupported(false), (withFu) => supabase.from('medical_records').insert(medToRow({ ...med, cowId: cid }, userId, withFu)));
       }
       for (const t of restorePending.feedTransactions || []) {
         const fid = feedTypeIdMap[t.feedTypeId]; if (!fid) continue;
@@ -1347,6 +1386,8 @@ export default function App() {
       ]);
       setCows(c); setMilk(m); setHeat(h); setMedical(med); setFeedTypes(ft); setFeedTransactions(tx); setFinanceEntries(fin);
       setMedicineTypes(mt); setMedicineTransactions(mtx);
+      // does the health table have the `followups` column yet? (decides whether several follow-ups per record can be saved)
+      supabase.from('medical_records').select('followups').limit(1).then(({ error }) => setFuSupported(!(error && /followups/i.test(error.message || ''))));
     } catch (e) {
       console.error('Failed to load data', e);
     }
@@ -1374,6 +1415,16 @@ export default function App() {
     setHeat(heat.filter((h) => h.id !== record.id));
   };
 
+  // mark follow-ups done / not done (or change the list); resolves with the updated record
+  const saveFollowups = async (record, followups) => {
+    const fu = normFollowups(followups);
+    const { data: row, error } = await runMedWrite(fuSupported, () => setFuSupported(false), (withFu) =>
+      supabase.from('medical_records').update(followupColumns(fu, withFu)).eq('id', record.id).select().single());
+    if (error || !row) throw new Error(error ? error.message : 'Could not save. Please check your connection and try again.');
+    const updated = mapMedFromRow(row);
+    setMedical((prev) => prev.map((m) => (m.id === record.id ? updated : m)));
+    return updated;
+  };
   const deleteFeedType = async (id) => {
     await supabase.from('feed_types').delete().eq('id', id);
     setFeedTypes((prev) => prev.filter((f) => f.id !== id));
@@ -1414,8 +1465,11 @@ export default function App() {
   const breedableCows = useMemo(() => cows.filter((c) => c.status !== 'calf' && c.status !== 'sold'), [cows]);
   const heatAlerts = useMemo(() => activeCows.map((c) => ({ cow: c, ...heatStatusFor(c) })).filter((x) => x.status === 'due' || x.status === 'overdue'), [activeCows, heat]);
   const insemAlerts = useMemo(() => activeCows.map((c) => ({ cow: c, ...inseminationStatusFor(c) })).filter((x) => x.status === 'due'), [activeCows]);
+  // one entry per follow-up that is overdue or due within a week (a record can have several)
   const medDue = useMemo(() => {
-    return medical.filter((m) => m.nextDueDate && !m.completed && diffDays(m.nextDueDate) <= 7).sort((a, b) => a.nextDueDate.localeCompare(b.nextDueDate));
+    const items = [];
+    medical.forEach((m) => openFollowups(m).forEach((f) => { if (diffDays(f.date) <= 7) items.push({ key: `${m.id}-${f.date}`, record: m, date: f.date }); }));
+    return items.sort((a, b) => a.date.localeCompare(b.date));
   }, [medical]);
   const insuranceAlerts = useMemo(() => {
     return cows
@@ -1488,11 +1542,7 @@ export default function App() {
               onAddMedical={() => setModal({ type: 'medical', cowId: openCowId })}
               onEditMedical={onEditMedical}
               onDeleteMedical={onDeleteMedical}
-              onToggleMedComplete={async (record, completed) => {
-                const { data: row, error } = await supabase.from('medical_records').update({ completed }).eq('id', record.id).select().single();
-                if (error) throw new Error(error.message);
-                if (row) setMedical(medical.map((m) => (m.id === record.id ? mapMedFromRow(row) : m)));
-              }}
+              onSaveFollowups={saveFollowups}
               onAddCalf={() => setModal({ type: 'cow', defaultStatus: 'calf', defaultMotherId: openCowId })}
               onOpenCow={setOpenCowId}
               onAskAI={() => setAskAI({ focusCow: cowById(openCowId) })}
@@ -1501,7 +1551,7 @@ export default function App() {
                 if (!cow) return;
                 const milkRows = milk.filter((m) => m.cowId === cow.id).sort((a, b) => a.date.localeCompare(b.date)).map((m) => [fmtDate(m.date), m.session, m.liters]);
                 const heatRows = heat.filter((h) => h.cowId === cow.id).sort((a, b) => a.date.localeCompare(b.date)).map((h) => [fmtDate(h.date), h.bred ? 'Yes' : 'No', h.notes || '']);
-                const medRows = medical.filter((m) => m.cowId === cow.id).sort((a, b) => a.date.localeCompare(b.date)).map((m) => [fmtDate(m.date), m.type, m.medicine || '', m.description || '', m.vet || '', m.nextDueDate ? fmtDate(m.nextDueDate) : '']);
+                const medRows = medical.filter((m) => m.cowId === cow.id).sort((a, b) => a.date.localeCompare(b.date)).map((m) => [fmtDate(m.date), m.type, m.medicine || '', m.description || '', m.vet || '', followupsText(m)]);
                 if (kind === 'print') {
                   setPrintJob({ type: 'cow', title: `${cow.name} — Full Record`, cow, milkRows, heatRows, medRows });
                 } else {
@@ -1512,7 +1562,7 @@ export default function App() {
                   if (cow.insured) sections.push(`Insured${cow.insuranceExpiryDate ? ` - expires ${fmtDate(cow.insuranceExpiryDate)}` : ''}`);
                   if (milkRows.length) sections.push('', 'MILK RECORDS', toCSV(['Date', 'Session', 'Liters'], milkRows));
                   if (heatRows.length) sections.push('', 'HEAT RECORDS', toCSV(['Date', 'Bred', 'Notes'], heatRows));
-                  if (medRows.length) sections.push('', 'HEALTH RECORDS', toCSV(['Date', 'Type', 'Medicine', 'Details', 'Vet', 'Next Due'], medRows));
+                  if (medRows.length) sections.push('', 'HEALTH RECORDS', toCSV(['Date', 'Type', 'Medicine', 'Details', 'Vet', 'Follow-ups'], medRows));
                   downloadFile(`${cow.name.replace(/\s+/g, '_')}_record.csv`, sections.join('\n'));
                 }
               }}
@@ -1569,11 +1619,8 @@ export default function App() {
                     if (kind === 'print') setPrintJob({ type: 'list', title: 'Health Records', headers: MED_HEADERS, rows });
                     else downloadFile('health_records.csv', toCSV(MED_HEADERS, rows));
                   }}
-                  onToggleComplete={async (record, completed) => {
-                    const { data: row, error } = await supabase.from('medical_records').update({ completed }).eq('id', record.id).select().single();
-                    if (error) throw new Error(error.message);
-                    if (row) setMedical(medical.map((m) => (m.id === record.id ? mapMedFromRow(row) : m)));
-                  }}
+                  onSaveFollowups={saveFollowups}
+                  followupsSupported={fuSupported}
                   onEditMedical={onEditMedical}
                   onDeleteMedical={onDeleteMedical}
                   medicineTypes={medicineTypes}
@@ -1784,20 +1831,16 @@ export default function App() {
               cows={cows} defaultCowId={modal.cowId}
               initial={modal.editId ? medical.find((m) => m.id === modal.editId) : null}
               onClose={() => setModal(null)}
+              followupsSupported={fuSupported}
               onSave={async ({ cowIds, ...rest }) => {
                 if (modal.editId) {
-                  const orig = medical.find((m) => m.id === modal.editId);
-                  const { data: row, error } = await supabase
-                    .from('medical_records')
-                    .update(medToRow({ ...rest, cowId: cowIds[0], completed: orig?.completed }, userId))
-                    .eq('id', modal.editId)
-                    .select()
-                    .single();
-                  if (!error && row) setMedical(medical.map((m) => (m.id === modal.editId ? mapMedFromRow(row) : m)));
+                  const { data: row, error } = await runMedWrite(fuSupported, () => setFuSupported(false), (withFu) =>
+                    supabase.from('medical_records').update(medToRow({ ...rest, cowId: cowIds[0] }, userId, withFu)).eq('id', modal.editId).select().single());
+                  if (!error && row) setMedical((prev) => prev.map((m) => (m.id === modal.editId ? mapMedFromRow(row) : m)));
                 } else {
-                  const rowsToInsert = cowIds.map((cid) => medToRow({ ...rest, cowId: cid }, userId));
-                  const { data: rows, error } = await supabase.from('medical_records').insert(rowsToInsert).select();
-                  if (!error && rows) setMedical([...medical, ...rows.map(mapMedFromRow)]);
+                  const { data: rows, error } = await runMedWrite(fuSupported, () => setFuSupported(false), (withFu) =>
+                    supabase.from('medical_records').insert(cowIds.map((cid) => medToRow({ ...rest, cowId: cid }, userId, withFu))).select());
+                  if (!error && rows) setMedical((prev) => [...prev, ...rows.map(mapMedFromRow)]);
                 }
                 setModal(null);
               }}
@@ -2394,15 +2437,16 @@ function HomeScreen({ cows, milkToday, heatAlerts, medDue, insemAlerts, insuranc
           <MutedNote text="Nothing due for the next 7 days." />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {medDue.slice(0, 5).map((m) => {
+            {medDue.slice(0, 5).map((it) => {
+              const m = it.record;
               const cow = cows.find((c) => c.id === m.cowId);
-              const overdue = diffDays(m.nextDueDate) < 0;
+              const overdue = diffDays(it.date) < 0;
               return (
-                <div key={m.id} onClick={() => cow && onOpenCowTab(cow.id, 'health')} style={rowCardStyle}>
+                <div key={it.key} onClick={() => cow && onOpenCowTab(cow.id, 'health')} style={rowCardStyle}>
                   {cow && <EarTag number={cow.tagNumber} size="sm" />}
                   <div style={{ flex: 1, marginLeft: 10 }}>
                     <div className="ff-display" style={{ fontWeight: 700, fontSize: 14.5, color: C.ink }}>{cow ? cow.name : 'Unknown'} · {m.type}</div>
-                    <div style={{ fontSize: 13, color: C.sub }}>Follow-up {fmtDateShort(m.nextDueDate)}</div>
+                    <div style={{ fontSize: 13, color: C.sub }}>Follow-up {fmtDateShort(it.date)}</div>
                   </div>
                   <Chip bg={overdue ? C.rustSoft : C.amberSoft} fg={overdue ? C.rust : C.amber}>{overdue ? 'Overdue' : 'Soon'}</Chip>
                 </div>
@@ -2553,7 +2597,7 @@ function CowsScreen({ cows, heatStatusFor, onOpenCow, onAddCow, onAddCalf, onExp
 }
 
 // ---------- Cow detail ----------
-function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus, initialTab, onBack, onEdit, onDelete, onAddMilk, onAddHeat, onAddMedical, onEditMedical, onDeleteMedical, onAddCalf, onOpenCow, onEditHeat, onDeleteHeat, onToggleMedComplete, onExport, onAskAI }) {
+function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus, initialTab, onBack, onEdit, onDelete, onAddMilk, onAddHeat, onAddMedical, onEditMedical, onDeleteMedical, onAddCalf, onOpenCow, onEditHeat, onDeleteHeat, onSaveFollowups, onExport, onAskAI }) {
   const { isReadOnly } = useContext(RoleContext);
   const [sub, setSub] = useState(initialTab || (['calf', 'heifer'].includes(cow?.status) ? 'health' : 'milk'));
   useEffect(() => {
@@ -2726,13 +2770,7 @@ function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus,
                   <div className="ff-display" style={{ fontWeight: 700, fontSize: 14.5, color: C.ink }}>{m.type}</div>
                   <div style={{ fontSize: 13, color: C.sub, marginTop: 1 }}>{fmtDate(m.date)}{m.vet ? ` · ${m.vet}` : ''}</div>
                   {m.medicine && <div style={{ fontSize: 13, color: C.ink, marginTop: 4 }}>Medicine: {m.medicine}</div>}
-                  {m.nextDueDate && (
-                    m.completed ? (
-                      <div style={{ marginTop: 5 }}><Chip bg={C.greenSoft} fg={C.green}>Completed</Chip></div>
-                    ) : (
-                      <div style={{ fontSize: 12.5, color: C.amber, marginTop: 4, fontWeight: 600 }}>Next due {fmtDateShort(m.nextDueDate)}</div>
-                    )
-                  )}
+                  <FollowupSummary m={m} />
                 </div>
                 <ChevronRight size={16} color={C.grey} />
               </div>
@@ -2777,7 +2815,7 @@ function CowDetail({ cow, milk, heat, medical, allCows, heatStatus, insemStatus,
           record={viewingMed}
           cow={cow}
           onClose={() => setViewingMed(null)}
-          onSaveComplete={async (r, completed) => { await onToggleMedComplete(r, completed); setViewingMed({ ...r, completed }); }}
+          onSaveFollowups={async (r, fu) => { const updated = await onSaveFollowups(r, fu); setViewingMed(updated); }}
           onEdit={(r) => { setViewingMed(null); onEditMedical(r); }}
           onDelete={(r) => { setViewingMed(null); onDeleteMedical(r); }}
         />
@@ -3164,36 +3202,30 @@ function HeatDetailModal({ record, cow, onClose, onEdit, onDelete }) {
   );
 }
 
-function HealthDetailModal({ record, cow, onClose, onSaveComplete, onEdit, onDelete }) {
+function HealthDetailModal({ record, cow, onClose, onSaveFollowups, onEdit, onDelete }) {
   const { isReadOnly } = useContext(RoleContext);
-  const [completed, setCompleted] = useState(!!record?.completed);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [saved, setSaved] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
   if (!record) return null;
+  const fu = medFollowups(record);
+  const doneCount = fu.filter((f) => f.done).length;
 
   if (confirmDel) {
     return (
       <Modal title="Delete this health record?" onClose={() => setConfirmDel(false)}>
-        <div style={{ fontSize: 14, color: C.sub, marginBottom: 14 }}>This removes the {record.type.toLowerCase()} record from {fmtDate(record.date)}. This can't be undone.</div>
+        <div style={{ fontSize: 14, color: C.sub, marginBottom: 14 }}>This removes the {record.type.toLowerCase()} record from {fmtDate(record.date)}{fu.length > 1 ? ` and its ${fu.length} follow-ups` : ''}. This can't be undone.</div>
         <PrimaryButton danger onClick={() => onDelete(record)}>Delete permanently</PrimaryButton>
       </Modal>
     );
   }
 
-  const dirty = completed !== !!record.completed;
-
-  const save = async () => {
-    setBusy(true);
-    setError('');
-    try {
-      await onSaveComplete(record, completed);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 1600);
-    } catch (e) {
-      setError(e?.message || 'Could not save. Please check your connection and try again.');
-    }
+  // tap a follow-up to mark it done (or not done); saved straight away
+  const toggle = async (idx) => {
+    if (busy || isReadOnly) return;
+    setBusy(true); setError('');
+    try { await onSaveFollowups(record, fu.map((f, i) => (i === idx ? { ...f, done: !f.done } : f))); }
+    catch (e) { setError((e && e.message) || "Couldn't save. Please try again."); }
     setBusy(false);
   };
 
@@ -3208,53 +3240,54 @@ function HealthDetailModal({ record, cow, onClose, onSaveComplete, onEdit, onDel
           </div>
         </div>
       )}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: record.nextDueDate ? 18 : 0 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 18 }}>
         <DetailRow label="Date" value={fmtDate(record.date)} />
         <DetailRow label="Type" value={record.type} />
         {record.medicine && <DetailRow label="Medicine used" value={record.medicine} />}
         {record.description && <DetailRow label="Details" value={record.description} />}
         {record.vet && <DetailRow label="Vet / attended by" value={record.vet} />}
-        {record.nextDueDate && (
-          <div>
-            <div className="ff-body" style={{ fontSize: 12.5, fontWeight: 600, color: C.sub, marginBottom: 2 }}>Next follow-up</div>
-            <div className="ff-body" style={{ fontSize: 14.5, color: C.ink, lineHeight: 1.5 }}>{fmtDate(record.nextDueDate)}</div>
-          </div>
-        )}
       </div>
-      {!isReadOnly && (
-        <div style={{ display: 'flex', gap: 8, marginBottom: record.nextDueDate ? 12 : 0 }}>
-          <button onClick={() => onEdit(record)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.brandSoft, color: C.brand, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 14, fontWeight: 700 }}>
-            <Pencil size={14} /> Edit
-          </button>
-          <button onClick={() => setConfirmDel(true)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.rustSoft, color: C.rust, border: 'none', borderRadius: 10, padding: '10px 0', fontSize: 14, fontWeight: 700 }}>
-            <Trash2 size={14} /> Delete
-          </button>
+
+      {fu.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 }}>
+            <div className="ff-display" style={{ fontSize: 15.5, color: C.ink }}>Follow-ups</div>
+            <div className="ff-body" style={{ fontSize: 13, color: C.sub }}>{doneCount} of {fu.length} done</div>
+          </div>
+          {!isReadOnly && <div className="ff-body" style={{ fontSize: 12.5, color: C.sub, marginBottom: 8 }}>Tap a follow-up to mark it done.</div>}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {fu.map((f, i) => {
+              const st = followupStatus(f);
+              const tone = FOLLOWUP_TONES[st.tone];
+              return (
+                <button
+                  key={f.date} onClick={() => toggle(i)} disabled={busy || isReadOnly} aria-label={`Follow-up ${fmtDate(f.date)}: ${st.label}`}
+                  style={{ display: 'flex', alignItems: 'center', gap: 12, background: f.done ? C.greenSoft : '#fff', border: `1.5px solid ${f.done ? C.green : C.line}`, borderRadius: 14, padding: '11px 12px', textAlign: 'left', opacity: busy ? 0.6 : 1, width: '100%' }}
+                >
+                  <div style={{ width: 26, height: 26, borderRadius: 13, border: `2px solid ${f.done ? C.green : C.grey}`, background: f.done ? C.green : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    {f.done && <Check size={15} color="#fff" strokeWidth={3} />}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="ff-display" style={{ fontSize: 15, color: C.ink }}>{fmtDate(f.date)}</div>
+                  </div>
+                  <Chip bg={tone.bg} fg={tone.fg}>{st.label}</Chip>
+                </button>
+              );
+            })}
+          </div>
+          {error && <div className="ff-body" style={{ color: C.rust, fontSize: 13, marginTop: 8 }}>{error}</div>}
         </div>
       )}
-      {record.nextDueDate && (
-        <>
-          <button
-            type="button"
-            onClick={() => setCompleted(!completed)}
-            className="ff-body"
-            style={{
-              display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-              border: `1.5px solid ${completed ? C.green : C.line}`, background: completed ? C.greenSoft : '#fff',
-              borderRadius: 10, padding: '11px 12px', marginBottom: 12,
-            }}
-          >
-            <div style={{ width: 20, height: 20, borderRadius: 6, border: `1.5px solid ${completed ? C.green : C.grey}`, background: completed ? C.green : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              {completed && <Check size={13} color="#fff" />}
-            </div>
-            <span style={{ fontSize: 14.5, fontWeight: 600, color: completed ? C.green : C.ink }}>This follow-up is completed</span>
+
+      {!isReadOnly && (
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => onEdit(record)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.brandSoft, color: C.brand, border: 'none', borderRadius: 12, padding: '12px 0', fontSize: 15, fontWeight: 700 }}>
+            <Pencil size={15} /> Edit
           </button>
-
-          {error && <div style={{ background: C.rustSoft, color: C.rust, borderRadius: 10, padding: 10, fontSize: 13.5, marginBottom: 12 }}>{error}</div>}
-
-          <PrimaryButton disabled={busy || !dirty} onClick={save}>
-            {busy ? 'Saving…' : saved ? 'Saved ✓' : 'Save'}
-          </PrimaryButton>
-        </>
+          <button onClick={() => setConfirmDel(true)} className="ff-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: C.rustSoft, color: C.rust, border: 'none', borderRadius: 12, padding: '12px 0', fontSize: 15, fontWeight: 700 }}>
+            <Trash2 size={15} /> Delete
+          </button>
+        </div>
       )}
     </Modal>
   );
@@ -3270,13 +3303,15 @@ function DetailRow({ label, value }) {
 }
 
 function HealthScreen({
-  medical, cowById, onAdd, onExport, onToggleComplete, onEditMedical, onDeleteMedical,
+  medical, cowById, onAdd, onExport, onSaveFollowups, followupsSupported = true, onEditMedical, onDeleteMedical,
   medicineTypes, medicineTransactions, onAddMedicineType, onEditMedicineType, onDeleteMedicineType,
   onLogMedicineTxn, onUpdateMedicineTxn, onDeleteMedicineTxn, onExportMedicine,
 }) {
   const [view, setView] = useState('records'); // 'records' | 'stock'
   const rows = medical.slice().sort((a, b) => b.date.localeCompare(a.date));
   const [viewing, setViewing] = useState(null);
+  const [showFuSetup, setShowFuSetup] = useState(false);
+  const { isReadOnly: isReadOnlyHealth } = useContext(RoleContext);
 
   if (view === 'stock') {
     return (
@@ -3305,14 +3340,19 @@ function HealthScreen({
         <div style={{ marginBottom: 14 }}>
           <Segmented options={['Records', 'Medicine Stock']} value="Records" onChange={(v) => setView(v === 'Records' ? 'records' : 'stock')} />
         </div>
+        {!followupsSupported && !isReadOnlyHealth && (
+          <div style={{ background: C.amberSoft, borderRadius: 16, padding: '12px 14px', marginBottom: 14 }}>
+            <div className="ff-display" style={{ fontSize: 15, color: C.amber }}>Want several follow-ups per record?</div>
+            <div className="ff-body" style={{ fontSize: 13.5, color: C.amber, margin: '2px 0 8px', lineHeight: 1.4 }}>A one-time database step is needed. It takes about a minute.</div>
+            <button onClick={() => setShowFuSetup(true)} className="ff-body" style={{ background: '#fff', color: C.amber, border: 'none', borderRadius: 10, padding: '8px 14px', fontSize: 14, fontWeight: 700 }}>Show me how</button>
+          </div>
+        )}
         {rows.length === 0 ? (
           <EmptyState icon={<Stethoscope size={30} />} title="No health records" subtitle="Log vaccinations, treatments, and checkups to keep every cow's history in one place." />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {rows.map((m) => {
               const cow = cowById(m.cowId);
-              const overdue = m.nextDueDate && !m.completed && diffDays(m.nextDueDate) < 0;
-              const soon = m.nextDueDate && !m.completed && diffDays(m.nextDueDate) >= 0 && diffDays(m.nextDueDate) <= 7;
               return (
                 <div key={m.id} onClick={() => setViewing(m)} style={{ ...rowCardStyle, alignItems: 'flex-start' }}>
                   {cow && <EarTag number={cow.tagNumber} size="sm" />}
@@ -3320,17 +3360,7 @@ function HealthScreen({
                     <div className="ff-display" style={{ fontWeight: 700, fontSize: 14.5, color: C.ink }}>{cow ? cow.name : 'Unknown'} · {m.type}</div>
                     <div style={{ fontSize: 13, color: C.sub, marginTop: 1 }}>{fmtDate(m.date)}{m.vet ? ` · ${m.vet}` : ''}</div>
                     {m.medicine && <div style={{ fontSize: 13, color: C.ink, marginTop: 4 }}>Medicine: {m.medicine}</div>}
-                    {m.nextDueDate && (
-                      <div style={{ marginTop: 5 }}>
-                        {m.completed ? (
-                          <Chip bg={C.greenSoft} fg={C.green}>Completed</Chip>
-                        ) : (
-                          <Chip bg={overdue ? C.rustSoft : soon ? C.amberSoft : C.greySoft} fg={overdue ? C.rust : soon ? C.amber : C.grey}>
-                            {overdue ? 'Follow-up overdue' : `Follow-up ${fmtDateShort(m.nextDueDate)}`}
-                          </Chip>
-                        )}
-                      </div>
-                    )}
+                    <FollowupSummary m={m} />
                   </div>
                   <ChevronRight size={16} color={C.grey} />
                 </div>
@@ -3344,11 +3374,12 @@ function HealthScreen({
           record={viewing}
           cow={cowById(viewing.cowId)}
           onClose={() => setViewing(null)}
-          onSaveComplete={async (r, completed) => { await onToggleComplete(r, completed); setViewing({ ...r, completed }); }}
+          onSaveFollowups={async (r, fu) => { const updated = await onSaveFollowups(r, fu); setViewing(updated); }}
           onEdit={(r) => { setViewing(null); onEditMedical(r); }}
           onDelete={(r) => { setViewing(null); onDeleteMedical(r); }}
         />
       )}
+      {showFuSetup && <FollowupsSetupModal onClose={() => setShowFuSetup(false)} />}
       <FAB onClick={onAdd} label="Add record" />
     </div>
   );
@@ -4242,7 +4273,122 @@ function HeatForm({ cows, defaultCowId, initial, onClose, onSave }) {
   );
 }
 
-function MedicalForm({ cows, defaultCowId, initial, onClose, onSave }) {
+// ---------- Follow-ups (several per health record) ----------
+const FOLLOWUPS_SQL = `alter table public.medical_records
+  add column if not exists followups jsonb not null default '[]'::jsonb;
+
+notify pgrst, 'reload schema';`;
+
+const FOLLOWUP_TONES = { green: { bg: C.greenSoft, fg: C.green }, amber: { bg: C.amberSoft, fg: C.amber }, rust: { bg: C.rustSoft, fg: C.rust }, grey: { bg: C.greySoft, fg: C.grey } };
+function followupStatus(f) {
+  if (f.done) return { label: 'Done', tone: 'green' };
+  const d = diffDays(f.date);
+  if (d < 0) return { label: d === -1 ? 'Overdue by 1 day' : `Overdue by ${-d} days`, tone: 'rust' };
+  if (d === 0) return { label: 'Due today', tone: 'amber' };
+  return { label: d === 1 ? 'Tomorrow' : `In ${d} days`, tone: d <= 7 ? 'amber' : 'grey' };
+}
+
+// One-line summary of a record's follow-ups for the list rows
+function FollowupSummary({ m }) {
+  const fu = medFollowups(m);
+  if (!fu.length) return null;
+  const open = fu.filter((f) => !f.done);
+  if (!open.length) {
+    return <div style={{ marginTop: 5 }}><Chip bg={C.greenSoft} fg={C.green}>{fu.length > 1 ? `All ${fu.length} follow-ups done` : 'Completed'}</Chip></div>;
+  }
+  const d = diffDays(open[0].date);
+  const overdue = d < 0;
+  const soon = d >= 0 && d <= 7;
+  return (
+    <div style={{ marginTop: 5, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      <Chip bg={overdue ? C.rustSoft : soon ? C.amberSoft : C.greySoft} fg={overdue ? C.rust : soon ? C.amber : C.grey}>
+        {overdue ? 'Follow-up overdue' : `Follow-up ${fmtDateShort(open[0].date)}`}
+      </Chip>
+      {fu.length > 1 && <span className="ff-body" style={{ fontSize: 12.5, color: C.sub }}>{fu.length - open.length} of {fu.length} done</span>}
+    </div>
+  );
+}
+
+// Shown when the database doesn't have the `followups` column yet — one pasted line fixes it, once.
+function FollowupsSetupModal({ onClose }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(FOLLOWUPS_SQL); setCopied(true); } catch (e) { /* the text can also be selected by hand */ }
+  };
+  return (
+    <Modal title="Allow several follow-ups" onClose={onClose}>
+      <div className="ff-body" style={{ fontSize: 14.5, color: C.sub, lineHeight: 1.5, marginBottom: 14 }}>
+        Your database needs one small, one-time update before a health record can hold more than one follow-up. Your existing records stay exactly as they are.
+      </div>
+      {[['1', 'Open your Supabase project and go to SQL Editor → New query.'], ['2', 'Paste the code below and press Run.'], ['3', 'Come back here and refresh the app.']].map(([n, t]) => (
+        <div key={n} style={{ display: 'flex', gap: 10, marginBottom: 8, alignItems: 'flex-start' }}>
+          <div className="ff-display" style={{ width: 24, height: 24, borderRadius: 12, background: C.brand, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, flexShrink: 0 }}>{n}</div>
+          <div className="ff-body" style={{ fontSize: 14.5, color: C.ink, lineHeight: 1.45, paddingTop: 2 }}>{t}</div>
+        </div>
+      ))}
+      <pre style={{ background: '#0F172A', color: '#E2E8F0', borderRadius: 12, padding: 12, fontSize: 12.5, lineHeight: 1.5, overflowX: 'auto', margin: '12px 0', userSelect: 'text', whiteSpace: 'pre-wrap' }}>{FOLLOWUPS_SQL}</pre>
+      <PrimaryButton onClick={copy}>{copied ? 'Copied ✓' : 'Copy the code'}</PrimaryButton>
+    </Modal>
+  );
+}
+
+const FOLLOWUP_PRESETS = [['1 week', (d) => addDays(d, 7)], ['2 weeks', (d) => addDays(d, 14)], ['3 weeks', (d) => addDays(d, 21)], ['1 month', (d) => addMonths(d, 1)], ['3 months', (d) => addMonths(d, 3)], ['6 months', (d) => addMonths(d, 6)], ['1 year', (d) => addMonths(d, 12)]];
+
+// The follow-up dates of a record: add as many as needed, remove or change any of them
+function FollowupsEditor({ followups, setFollowups, baseDate, multi, onShowSetup }) {
+  const base = baseDate || todayStr();
+  const add = (d) => setFollowups((fs) => (fs.some((f) => f.date === d) ? fs : [...fs, { date: d, done: false }]));
+  const addNext = () => {
+    let d = addDays(followups.length ? followups.map((f) => f.date).sort().pop() : base, 7);
+    while (followups.some((f) => f.date === d)) d = addDays(d, 1);
+    add(d);
+  };
+  const change = (i, d) => setFollowups((fs) => fs.map((f, k) => (k === i ? { ...f, date: d } : f)));
+  const remove = (i) => setFollowups((fs) => fs.filter((_, k) => k !== i));
+  const ordinal = (n) => ['1st', '2nd', '3rd'][n] || `${n + 1}th`;
+  return (
+    <Field label="Follow-ups (optional)">
+      {followups.map((f, i) => (
+        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <div className="ff-body" style={{ width: 34, fontSize: 12.5, fontWeight: 700, color: C.sub, flexShrink: 0 }}>{ordinal(i)}</div>
+          <input type="date" value={f.date} onChange={(e) => change(i, e.target.value)} aria-label={`Follow-up ${i + 1} date`} style={{ ...inputStyle, flex: 1, minWidth: 0 }} />
+          {f.done && <Chip bg={C.greenSoft} fg={C.green}>Done</Chip>}
+          <button onClick={() => remove(i)} aria-label={`Remove follow-up ${i + 1}`} style={{ background: C.greySoft, border: 'none', borderRadius: 10, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <X size={16} color={C.ink} />
+          </button>
+        </div>
+      ))}
+      {multi ? (
+        <>
+          <div className="ff-body" style={{ fontSize: 12.5, color: C.sub, margin: '2px 0 6px' }}>{followups.length ? 'Add another:' : 'Quick add, counted from the date above:'}</div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+            {FOLLOWUP_PRESETS.map(([label, fn]) => (
+              <button key={label} onClick={() => add(fn(base))} className="ff-body" style={{ background: C.brandSoft, color: C.brand, border: 'none', borderRadius: 10, padding: '7px 11px', fontSize: 13.5, fontWeight: 700 }}>
+                + {label}
+              </button>
+            ))}
+          </div>
+          <button onClick={addNext} className="ff-body" style={{ width: '100%', background: '#fff', color: C.brand, border: `1.5px dashed ${C.brand}66`, borderRadius: 12, padding: '10px 0', fontSize: 14.5, fontWeight: 700 }}>
+            + Pick another date
+          </button>
+        </>
+      ) : (
+        <>
+          {followups.length === 0 && (
+            <button onClick={addNext} className="ff-body" style={{ width: '100%', background: '#fff', color: C.brand, border: `1.5px dashed ${C.brand}66`, borderRadius: 12, padding: '10px 0', fontSize: 14.5, fontWeight: 700 }}>
+              + Add a follow-up date
+            </button>
+          )}
+          <button onClick={onShowSetup} className="ff-body" style={{ background: 'none', border: 'none', color: C.amber, fontSize: 13, fontWeight: 700, padding: '8px 0 0', textAlign: 'left', lineHeight: 1.4 }}>
+            Only one follow-up can be saved right now. Tap to see the one-time step for several.
+          </button>
+        </>
+      )}
+    </Field>
+  );
+}
+
+function MedicalForm({ cows, defaultCowId, initial, followupsSupported = true, onClose, onSave }) {
   const fixedCowId = initial?.cowId || defaultCowId;
   const ALL_COWS = '__all__';
   const [cowSelection, setCowSelection] = useState(fixedCowId || '');
@@ -4254,7 +4400,8 @@ function MedicalForm({ cows, defaultCowId, initial, onClose, onSave }) {
   const [medicine, setMedicine] = useState(initial?.medicine || '');
   const [description, setDescription] = useState(initial?.description || '');
   const [vet, setVet] = useState(initial?.vet || '');
-  const [nextDueDate, setNextDueDate] = useState(initial?.nextDueDate || '');
+  const [followups, setFollowups] = useState(() => (initial ? medFollowups(initial) : []));
+  const [showSetup, setShowSetup] = useState(false);
   const valid = cowIds.length > 0 && date && type;
   const cow = fixedCowId ? cows.find((c) => c.id === fixedCowId) : null;
   return (
@@ -4289,10 +4436,17 @@ function MedicalForm({ cows, defaultCowId, initial, onClose, onSave }) {
         <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What was done / observed" style={{ ...inputStyle, minHeight: 70, resize: 'vertical' }} />
       </Field>
       <Field label="Vet / attended by (optional)"><input value={vet} onChange={(e) => setVet(e.target.value)} placeholder="e.g. Dr. Rao" style={inputStyle} /></Field>
-      <Field label="Next follow-up date (optional)"><input type="date" value={nextDueDate} onChange={(e) => setNextDueDate(e.target.value)} style={inputStyle} /></Field>
-      <PrimaryButton disabled={!valid} onClick={() => onSave({ cowIds, date, type, medicine: medicine.trim(), description: description.trim(), vet: vet.trim(), nextDueDate })}>
+      <FollowupsEditor followups={followups} setFollowups={setFollowups} baseDate={date} multi={followupsSupported} onShowSetup={() => setShowSetup(true)} />
+      <PrimaryButton
+        disabled={!valid}
+        onClick={() => {
+          const cleaned = normFollowups(followups); // drops empty dates, removes duplicates, sorts by date
+          onSave({ cowIds, date, type, medicine: medicine.trim(), description: description.trim(), vet: vet.trim(), followups: followupsSupported ? cleaned : cleaned.slice(0, 1) });
+        }}
+      >
         {initial ? 'Save changes' : `Save record${cowIds.length > 1 ? ` for ${cowIds.length} cows` : ''}`}
       </PrimaryButton>
+      {showSetup && <FollowupsSetupModal onClose={() => setShowSetup(false)} />}
     </Modal>
   );
 }
